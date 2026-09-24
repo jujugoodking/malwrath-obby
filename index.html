@@ -69,7 +69,6 @@
   .stagebtn.done{border-color:var(--hero);color:var(--hero);}
   .stagebtn.boss{border-color:var(--bad);color:var(--bad);font-weight:bold;}
   .stagebtn:disabled{opacity:.35;cursor:not-allowed;}
-  .stagebtn.custom{box-shadow:0 0 0 2px var(--gold) inset;}
   /* HUD */
   #hud{position:fixed;top:0;left:0;right:0;display:none;justify-content:space-between;
     padding:10px 14px;z-index:10;pointer-events:none;font-size:14px;text-shadow:1px 1px 0 #000;}
@@ -302,7 +301,6 @@
     <button id="edTest" style="border-color:var(--hero)">&#9654; TEST</button>
     <button id="edClear" class="danger">CLEAR</button>
     <button id="edShare">SHARE CODE</button>
-    <button id="edInstall" style="border-color:var(--gold)">&#128204; INSTALL AS CAMPAIGN STAGE</button>
     <button id="edBoss" style="border-color:var(--bad)">&#9760; BOSS</button>
     <button id="edBlockset">&#9646; BLOCKS: STORY 2</button>
     <label style="font-size:11px;color:var(--dim);display:flex;align-items:center;gap:4px">
@@ -1185,13 +1183,6 @@ const STORIES=[
  {id:1,name:'PART 2 — THE LOCKDOWN',worlds:STORY2}
 ];
 let WORLDS=STORY1;
-let G_stageOverrides={};
-function overrideKey(story,world,stage){ return story+'-'+world+'-'+stage; }
-function getStageLevel(story,world,stage){
-  const ov=G_stageOverrides[overrideKey(story,world,stage)];
-  if(ov) return objToLevel(ov);
-  return STORIES[story].worlds[world].stages[stage];
-}
 
 
 /* =========================================================
@@ -1245,7 +1236,6 @@ function switchStory(i){
   }
   ensureProgressShape();
   const l=await storeGet('obby-levels'); if(l) G.customList=l;
-  const ov=await storeGet('obby-stage-overrides'); if(ov) G_stageOverrides=ov;
   const s=await storeGet('obby-settings'); if(s) Object.assign(SET,s);
   syncSettingsUI(); })();
 
@@ -1269,7 +1259,7 @@ $('volSfx').oninput=e=>{ SET.sfx=e.target.value/100; saveSettings(); };
 $('volSfx').onchange=()=>SFX.jump();
 $('btnLowPower').onclick=()=>{ SET.lowPower=!SET.lowPower; syncSettingsUI(); saveSettings(); SFX.click(); };
 $('btnAutoRetry').onclick=()=>{ SET.autoRetry=!SET.autoRetry; syncSettingsUI(); saveSettings(); SFX.click(); };
-const GAME_VERSION=5;
+const GAME_VERSION=6;
 const VERSION_CHECK_URL='https://raw.githubusercontent.com/jujugoodking/malwrath-obby/main/version.json';
 const LIVE_GAME_URL='https://jujugoodking.github.io/malwrath-obby/';
 { const vn=$('verNum'); if(vn)vn.textContent=GAME_VERSION; }
@@ -1351,7 +1341,7 @@ $('btnLoadData').onclick=()=>{
 /* ---- portable save codes ---- */
 function makeSaveCode(){
   ensureProgressShape();
-  const data={v:1, p:G.progressAll, s:SET, l:G.customList||[], o:G_stageOverrides||{}};
+  const data={v:1, p:G.progressAll, s:SET, l:G.customList||[]};
   return 'OBBY1.'+btoa(unescape(encodeURIComponent(JSON.stringify(data))));
 }
 function loadSaveCode(code){
@@ -1363,7 +1353,6 @@ function loadSaveCode(code){
     G.progressAll=data.p; ensureProgressShape(); switchStory(0);
     if(data.s){ Object.assign(SET,data.s); MUSIC.setVol(); syncSettingsUI(); saveSettings(); }
     if(Array.isArray(data.l)){ G.customList=data.l; storeSet('obby-levels',G.customList); }
-    if(data.o && typeof data.o==='object'){ G_stageOverrides=data.o; storeSet('obby-stage-overrides',G_stageOverrides); }
     saveProgress();
     $('storyDrop').innerHTML='&#9662; '+STORIES[0].name;
     return true;
@@ -2304,7 +2293,7 @@ function startCampaignStage(fromMenu){
     const wt='s'+(G.story||0)+'w'+G.world;
     MUSIC.start(TRACKS[wt]?wt:'world', (G.stage%5)*2-2);   // each stage plays in its own register
   }
-  loadStage(getStageLevel(G.story||0,G.world,G.stage),'campaign');
+  loadStage(WORLDS[G.world].stages[G.stage],'campaign');
   if(G.story===1&&G.world===0&&G.stage===0&&!G._introShown){
     G._introShown=true;
     say([
@@ -2689,10 +2678,8 @@ function buildWorldSelect(){
     for(let s=0;s<w.stages.length;s++){
       const b=document.createElement('button');
       const isMini=s===4&&((G.story!==1&&wi<2)||(G.story===1&&(wi===1||wi===3)));
-      const hasOverride=!!G_stageOverrides[overrideKey(G.story||0,wi,s)];
-      b.className='stagebtn'+((w.boss||isMini)?' boss':'')+((G.progress.done[wi]&&G.progress.done[wi][s])?' done':'')+(hasOverride?' custom':'');
+      b.className='stagebtn'+((w.boss||isMini)?' boss':'')+((G.progress.done[wi]&&G.progress.done[wi][s])?' done':'');
       if(G.progress.done[wi]&&G.progress.done[wi][s]) b.title='cleared ✓';
-      if(hasOverride) b.title=(b.title?b.title+' — ':'')+'your custom stage';
       b.textContent=w.boss?'☠':(isMini?'⚔':s+1);
       b.disabled=!G.progress.unlocked[wi][s];
       b.onclick=()=>{ SFX.click(); G.world=wi;G.stage=s;G.lives=maxLives(); startCampaignStage(true); };
@@ -4619,62 +4606,6 @@ $('btnMyLevels').onclick=async()=>{
 function openModal(html){$('modalInner').innerHTML=html;$('modal').classList.add('show');}
 function closeModal(){$('modal').classList.remove('show');}
 $('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal();});
-
-function installableWorlds(storyI){
-  return STORIES[storyI].worlds.map((w,i)=>({i,w})).filter(x=>!x.w.boss);
-}
-function renderInstallModal(){
-  const storyI=parseInt($('instStory').value)||0;
-  const worlds=installableWorlds(storyI);
-  const worldSel=$('instWorld');
-  worldSel.innerHTML=worlds.map(x=>`<option value="${x.i}">${x.w.name}</option>`).join('');
-  renderInstallStages();
-}
-function renderInstallStages(){
-  const storyI=parseInt($('instStory').value)||0, worldI=parseInt($('instWorld').value)||0;
-  const world=STORIES[storyI].worlds[worldI];
-  const stageSel=$('instStage');
-  stageSel.innerHTML=world.stages.map((s,i)=>`<option value="${i}">Stage ${i+1}${G_stageOverrides[overrideKey(storyI,worldI,i)]?' — (your stage installed)':''}</option>`).join('');
-}
-$('edInstall').onclick=()=>{
-  SFX.click();
-  openModal(`<h3>&#128204; INSTALL AS CAMPAIGN STAGE</h3>
-    <div style="font-size:11px;color:var(--dim);margin-bottom:10px">Saves this level right into a World/Stage slot in the campaign — permanently, on this browser. It replaces the built-in stage there. You can revert it any time.</div>
-    <div style="display:flex;flex-direction:column;gap:8px">
-      <label style="font-size:11px;color:var(--dim)">STORY
-        <select id="instStory" style="width:100%">${STORIES.map((s,i)=>`<option value="${i}">${s.name}</option>`).join('')}</select>
-      </label>
-      <label style="font-size:11px;color:var(--dim)">WORLD
-        <select id="instWorld" style="width:100%"></select>
-      </label>
-      <label style="font-size:11px;color:var(--dim)">STAGE
-        <select id="instStage" style="width:100%"></select>
-      </label>
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-      <button id="instRemove" class="danger">REMOVE OVERRIDE</button>
-      <button id="instGo" style="border-color:var(--gold)">INSTALL HERE</button>
-      <button id="instClose">CANCEL</button>
-    </div>`);
-  $('instStory').onchange=renderInstallModal;
-  $('instWorld').onchange=renderInstallStages;
-  renderInstallModal();
-  $('instGo').onclick=async()=>{
-    const storyI=parseInt($('instStory').value), worldI=parseInt($('instWorld').value), stageI=parseInt($('instStage').value);
-    G_stageOverrides[overrideKey(storyI,worldI,stageI)]=levelToObj(ED.lv);
-    await storeSet('obby-stage-overrides',G_stageOverrides);
-    SFX.win(); closeModal();
-    toast(`✓ Installed as ${STORIES[storyI].name.split(' — ')[0]}, ${STORIES[storyI].worlds[worldI].name} Stage ${stageI+1}`,3200);
-  };
-  $('instRemove').onclick=async()=>{
-    const storyI=parseInt($('instStory').value), worldI=parseInt($('instWorld').value), stageI=parseInt($('instStage').value);
-    delete G_stageOverrides[overrideKey(storyI,worldI,stageI)];
-    await storeSet('obby-stage-overrides',G_stageOverrides);
-    SFX.click(); renderInstallStages();
-    toast('Reverted to the built-in stage.',2000);
-  };
-  $('instClose').onclick=closeModal;
-};
 
 </script>
 </body>
