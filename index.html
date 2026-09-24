@@ -69,6 +69,7 @@
   .stagebtn.done{border-color:var(--hero);color:var(--hero);}
   .stagebtn.boss{border-color:var(--bad);color:var(--bad);font-weight:bold;}
   .stagebtn:disabled{opacity:.35;cursor:not-allowed;}
+  .stagebtn.custom{box-shadow:0 0 0 2px var(--gold) inset;}
   /* HUD */
   #hud{position:fixed;top:0;left:0;right:0;display:none;justify-content:space-between;
     padding:10px 14px;z-index:10;pointer-events:none;font-size:14px;text-shadow:1px 1px 0 #000;}
@@ -287,12 +288,21 @@
       <option value="40">MEDIUM 40×40</option>
       <option value="55">LARGE 55×55</option>
       <option value="80">GIANT 80×80</option>
+      <option value="landscape">LANDSCAPE 100×24</option>
+      <option value="custom">CUSTOM…</option>
     </select>
+    <span id="edCustomWH" style="display:none;gap:4px;align-items:center">
+      <input type="text" id="edCustomW" value="60" style="width:48px;padding:6px" placeholder="w">×
+      <input type="text" id="edCustomH" value="30" style="width:48px;padding:6px" placeholder="h">
+      <button id="edCustomGo" style="padding:6px 10px;font-size:12px">SET</button>
+    </span>
+    <span id="edSizeLabel" style="font-size:11px;color:var(--dim)">25×25</span>
     <input type="text" id="edName" placeholder="stage name" maxlength="24" style="width:150px">
     <button id="edSave">SAVE</button>
     <button id="edTest" style="border-color:var(--hero)">&#9654; TEST</button>
     <button id="edClear" class="danger">CLEAR</button>
     <button id="edShare">SHARE CODE</button>
+    <button id="edInstall" style="border-color:var(--gold)">&#128204; INSTALL AS CAMPAIGN STAGE</button>
     <button id="edBoss" style="border-color:var(--bad)">&#9760; BOSS</button>
     <button id="edBlockset">&#9646; BLOCKS: STORY 2</button>
     <label style="font-size:11px;color:var(--dim);display:flex;align-items:center;gap:4px">
@@ -504,8 +514,16 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const rnd=(a,b)=>a+Math.random()*(b-a);
 
 /* ---------- persistent storage (best-effort) ---------- */
-async function storeGet(k){ try{ if(window.storage){const r=await window.storage.get(k); return r?JSON.parse(r.value):null;} }catch(e){} return memStore[k]||null; }
-async function storeSet(k,v){ try{ if(window.storage){await window.storage.set(k,JSON.stringify(v)); return;} }catch(e){} memStore[k]=v; }
+async function storeGet(k){
+  try{ if(window.storage){const r=await window.storage.get(k); return r?JSON.parse(r.value):null;} }catch(e){}
+  try{ const v=localStorage.getItem('obby:'+k); if(v!=null) return JSON.parse(v); }catch(e){}
+  return memStore[k]||null;
+}
+async function storeSet(k,v){
+  try{ if(window.storage){await window.storage.set(k,JSON.stringify(v)); return;} }catch(e){}
+  try{ localStorage.setItem('obby:'+k, JSON.stringify(v)); return; }catch(e){}
+  memStore[k]=v;
+}
 const memStore={};
 
 /* ---------- level model ---------- */
@@ -1167,6 +1185,13 @@ const STORIES=[
  {id:1,name:'PART 2 — THE LOCKDOWN',worlds:STORY2}
 ];
 let WORLDS=STORY1;
+let G_stageOverrides={};
+function overrideKey(story,world,stage){ return story+'-'+world+'-'+stage; }
+function getStageLevel(story,world,stage){
+  const ov=G_stageOverrides[overrideKey(story,world,stage)];
+  if(ov) return objToLevel(ov);
+  return STORIES[story].worlds[world].stages[stage];
+}
 
 
 /* =========================================================
@@ -1220,6 +1245,7 @@ function switchStory(i){
   }
   ensureProgressShape();
   const l=await storeGet('obby-levels'); if(l) G.customList=l;
+  const ov=await storeGet('obby-stage-overrides'); if(ov) G_stageOverrides=ov;
   const s=await storeGet('obby-settings'); if(s) Object.assign(SET,s);
   syncSettingsUI(); })();
 
@@ -1243,7 +1269,7 @@ $('volSfx').oninput=e=>{ SET.sfx=e.target.value/100; saveSettings(); };
 $('volSfx').onchange=()=>SFX.jump();
 $('btnLowPower').onclick=()=>{ SET.lowPower=!SET.lowPower; syncSettingsUI(); saveSettings(); SFX.click(); };
 $('btnAutoRetry').onclick=()=>{ SET.autoRetry=!SET.autoRetry; syncSettingsUI(); saveSettings(); SFX.click(); };
-const GAME_VERSION=3;
+const GAME_VERSION=5;
 const VERSION_CHECK_URL='https://raw.githubusercontent.com/jujugoodking/malwrath-obby/main/version.json';
 const LIVE_GAME_URL='https://jujugoodking.github.io/malwrath-obby/';
 { const vn=$('verNum'); if(vn)vn.textContent=GAME_VERSION; }
@@ -1325,7 +1351,7 @@ $('btnLoadData').onclick=()=>{
 /* ---- portable save codes ---- */
 function makeSaveCode(){
   ensureProgressShape();
-  const data={v:1, p:G.progressAll, s:SET, l:G.customList||[]};
+  const data={v:1, p:G.progressAll, s:SET, l:G.customList||[], o:G_stageOverrides||{}};
   return 'OBBY1.'+btoa(unescape(encodeURIComponent(JSON.stringify(data))));
 }
 function loadSaveCode(code){
@@ -1337,6 +1363,7 @@ function loadSaveCode(code){
     G.progressAll=data.p; ensureProgressShape(); switchStory(0);
     if(data.s){ Object.assign(SET,data.s); MUSIC.setVol(); syncSettingsUI(); saveSettings(); }
     if(Array.isArray(data.l)){ G.customList=data.l; storeSet('obby-levels',G.customList); }
+    if(data.o && typeof data.o==='object'){ G_stageOverrides=data.o; storeSet('obby-stage-overrides',G_stageOverrides); }
     saveProgress();
     $('storyDrop').innerHTML='&#9662; '+STORIES[0].name;
     return true;
@@ -2277,7 +2304,7 @@ function startCampaignStage(fromMenu){
     const wt='s'+(G.story||0)+'w'+G.world;
     MUSIC.start(TRACKS[wt]?wt:'world', (G.stage%5)*2-2);   // each stage plays in its own register
   }
-  loadStage(WORLDS[G.world].stages[G.stage],'campaign');
+  loadStage(getStageLevel(G.story||0,G.world,G.stage),'campaign');
   if(G.story===1&&G.world===0&&G.stage===0&&!G._introShown){
     G._introShown=true;
     say([
@@ -2662,8 +2689,10 @@ function buildWorldSelect(){
     for(let s=0;s<w.stages.length;s++){
       const b=document.createElement('button');
       const isMini=s===4&&((G.story!==1&&wi<2)||(G.story===1&&(wi===1||wi===3)));
-      b.className='stagebtn'+((w.boss||isMini)?' boss':'')+((G.progress.done[wi]&&G.progress.done[wi][s])?' done':'');
+      const hasOverride=!!G_stageOverrides[overrideKey(G.story||0,wi,s)];
+      b.className='stagebtn'+((w.boss||isMini)?' boss':'')+((G.progress.done[wi]&&G.progress.done[wi][s])?' done':'')+(hasOverride?' custom':'');
       if(G.progress.done[wi]&&G.progress.done[wi][s]) b.title='cleared ✓';
+      if(hasOverride) b.title=(b.title?b.title+' — ':'')+'your custom stage';
       b.textContent=w.boss?'☠':(isMini?'⚔':s+1);
       b.disabled=!G.progress.unlocked[wi][s];
       b.onclick=()=>{ SFX.click(); G.world=wi;G.stage=s;G.lives=maxLives(); startCampaignStage(true); };
@@ -2795,7 +2824,7 @@ const B={ // boss state
 function startCustomStage(lv,src){
   G.lives=maxLives();
   if(lv.boss){
-    if(lv.boss.kind==='malwrath') startCustomMalwrath(lv,src);
+    if(lv.boss.kind==='malwrath'||lv.boss.kind==='cipheron') startCustomMalwrath(lv,src);
     else startCustomMini(lv,src);
     return;
   }
@@ -2804,25 +2833,25 @@ function startCustomStage(lv,src){
 }
 function startCustomMalwrath(lv,src){
   const cfg=lv.boss;
-  B.skin='mal';
+  B.skin=cfg.kind==='cipheron'?'ciph':'mal';
   showGameChrome();
   G.mode='boss'; G.source=src; G.useWall=false;
   $('timerbar').style.display='none';
   $('glitch').style.display='none'; document.body.style.filter='';
-  MUSIC.start('boss');
+  MUSIC.start(B.skin==='ciph'?'cboss':'boss');
   loadStage(lv,src);
   G.useWall=false; G.wallActive=false; $('timerbar').style.display='none';
   G.friend=null; G.finish.tx=-1;
   B.checkpoint=1;
   Object.assign(B,{active:true,wave:1,hp:cfg.hp,maxhp:cfg.hp,t:0,attack:null,atkT:0,cycle:0,
     projs:[],warns:[],beams:[],cores:[],minis:[],vulnerable:false,splitAnim:0,dlgFlags:{},
-    tx:0,ty:0,moveT:0,w3:null,fw:null,sweeps:[]});
+    tx:0,ty:0,moveT:0,w3:null,fw:null,sweeps:[],scan:null,gridSafe:null,rooms:[],keyItems:[],awake:false});
   B.cfg={w2:!!cfg.w2,w3:!!cfg.w3,spd:cfg.spd||1};
   B.sweepCd=240; $('btnRestart').style.background='';
   B.homeX=BOSS_ARENA_W*T-220; B.homeY=150; B.x=B.homeX; B.y=B.homeY;
   B.tx=B.homeX; B.ty=B.homeY;
   $('bosshud').style.display='block';
-  $('bosshud').querySelector('.bname').textContent='M A L W R A T H';
+  $('bosshud').querySelector('.bname').textContent=B.skin==='ciph'?'C I P H E R O N':'M A L W R A T H';
   setBossHP();
   updateHUD();
 }
@@ -2834,11 +2863,15 @@ function startCustomMini(lv,src){
   loadStage(lv,src);
   G.useWall=false; $('timerbar').style.display='none';
   G.finish.tx=-1; G.friend=null;
-  const kind=cfg.kind==='glitch'?0:1;
-  const bw=kind===0?46:54, bh=kind===0?38:46;
-  G.mini={kind,name:(kind===0?'GLITCHLING':'FIREWALL BRUTE')+' — CUSTOM',
-          x:lv.w*T*0.65,y:2*T,w:bw,h:bh,vx:0,vy:0,dir:-1,hp:cfg.mhp,maxhp:cfg.mhp,
-          inv:0,t:0,cd:kind===0?60:100,minionCd:220,mortarCd:240,chargeCd:320,chargeT:0,
+  const kindMap={glitch:0,brute:1,lockjaw:2,auditor:3};
+  const kind=kindMap[cfg.kind]??0;
+  const dims=[[46,38],[54,46],[62,44],[50,44]][kind];
+  const names=['GLITCHLING','FIREWALL BRUTE','SENTINEL LOCKJAW','THE AUDITOR'];
+  G.mini={kind,name:names[kind]+' — CUSTOM',
+          x:lv.w*T*0.65,y:2*T,w:dims[0],h:dims[1],vx:0,vy:0,dir:-1,hp:cfg.mhp,maxhp:cfg.mhp,
+          inv:0,t:0,cd:kind===0?60:(kind===2?64:100),minionCd:220,mortarCd:240,chargeCd:320,chargeT:0,
+          lungeCd:150,lungeT:0,spitCd:110,stampCd:220,tpCd:340,podCd:150,pod:false,podT:0,stun:0,
+          hover:kind===3,hx:lv.w*T*0.65,hy:2*T,
           grounded:false,wasAir:false,dead:false,deadT:0,aggro:cfg.aggro||1};
 }
 function startBoss(){
@@ -3297,12 +3330,12 @@ function damageBoss(owner,amt){
   SFX.bosshit(); G.shake=10;
   spawnParts((owner.mini||owner===B.w3?owner.x:B.x),(owner.mini||owner===B.w3?owner.y:B.y)+20,'#7cff4f',20,4);
   if(B.wave===1){
-    const hasNext = !B.cfg || B.cfg.w2 || B.cfg.w3;
+    const hasNext = B.skin==='ciph' ? true : (!B.cfg || B.cfg.w2 || B.cfg.w3);
     B.hp=Math.max(hasNext?1:0, B.hp-amt);   // he only refuses to die if another wave awaits
     setBossHP();
     if(B.hp<=1 && !B.dlgFlags.one && hasNext){
       B.dlgFlags.one=1;
-      if(B.skin==='ciph' && !B.cfg){
+      if(B.skin==='ciph'){
         say(["Structural integrity: compromised.",
              "Then the vault fails DOWNWARD."],"CIPHERON",false,()=>{ beginCiphClimb(); });
       }
@@ -4287,40 +4320,63 @@ function buildPalette(){
     box.appendChild(b);
   });
 }
-function freshEditorLevel(size){
-  const lv=newLevel(size,size);
-  for(let x=0;x<size;x++){gset(lv,x,size-1,CODES.BLOCK); if(size>12) gset(lv,x,size-2,CODES.BLOCK);}
-  gset(lv,1,size-3,CODES.START);
-  gset(lv,size-2,size-3,CODES.FINISH);
+function freshEditorLevel(w,h){
+  h=h||w;
+  const lv=newLevel(w,h);
+  for(let x=0;x<w;x++){gset(lv,x,h-1,CODES.BLOCK); if(h>12) gset(lv,x,h-2,CODES.BLOCK);}
+  gset(lv,1,h-3,CODES.START);
+  gset(lv,w-2,h-3,CODES.FINISH);
   return lv;
 }
 function enterEditor(fresh=true){
   hide('menu');hide('worldSelect');hideGameChrome();closePause();
   G.mode='editor'; G.source='editorTest';
   $('editorUI').classList.add('show');
-  if(fresh||!ED.lv){ ED.lv=freshEditorLevel(parseInt($('edSize').value)); fitEditorCam();
+  if(fresh||!ED.lv){ ED.lv=freshEditorLevel(...sizeFromSelect()); fitEditorCam();
     $('edWall').checked=false; $('edDashMode').checked=false; }
   G.level=ED.lv; G.runGrid=ED.lv.grid;
   G.enemies=[];G.movers=[];G.parts=[];G.friend=null;G.wallActive=false;G.mini=null;G.mbul=[];
   buildPalette();
+  updateSizeLabel();
 }
 function fitEditorCam(){
   const wpx=ED.lv.w*T, hpx=ED.lv.h*T;
   ED.zoom=clamp(Math.min((cv.width-140)/wpx,(cv.height-80)/hpx),0.15,1.4);
   ED.cam.x=-(140/ED.zoom); ED.cam.y=-(70/ED.zoom);
 }
+function updateSizeLabel(){ $('edSizeLabel').textContent=ED.lv.w+'×'+ED.lv.h; }
+function setSizeSelectFor(lv){
+  const sq=[10,25,40,55,80];
+  if(lv.w===lv.h && sq.includes(lv.w)){ $('edSize').value=lv.w; $('edCustomWH').style.display='none'; }
+  else if(lv.w===100 && lv.h===24){ $('edSize').value='landscape'; $('edCustomWH').style.display='none'; }
+  else { $('edSize').value='custom'; $('edCustomW').value=lv.w; $('edCustomH').value=lv.h; $('edCustomWH').style.display='flex'; }
+  updateSizeLabel();
+}
+function sizeFromSelect(){
+  const v=$('edSize').value;
+  if(v==='landscape') return [100,24];
+  if(v==='custom') return [clamp(parseInt($('edCustomW').value)||60,6,160), clamp(parseInt($('edCustomH').value)||30,6,160)];
+  const s=parseInt(v); return [s,s];
+}
+function resizeGridTo(w,h){
+  const old=ED.lv, nv=freshEditorLevel(w,h);
+  nv.grid.fill(0);
+  for(let y=0;y<Math.min(old.h,h);y++)for(let x=0;x<Math.min(old.w,w);x++) gset(nv,x,y,gget(old,x,y));
+  ED.lv=nv; G.level=nv; G.runGrid=nv.grid; fitEditorCam();
+  updateSizeLabel();
+  toast('Grid resized to '+w+'×'+h);
+}
 $('btnEditor').onclick=()=>{SFX.click();enterEditor(true);};
 $('edBack').onclick=()=>{SFX.click();$('editorUI').classList.remove('show');G.mode='menu';show('menu');};
 $('edSize').onchange=()=>{
-  const s=parseInt($('edSize').value);
-  const old=ED.lv, nv=freshEditorLevel(s);
-  // copy overlap (minus auto floor we just made? keep simple: copy old cells over)
-  nv.grid.fill(0);
-  for(let y=0;y<Math.min(old.h,s);y++)for(let x=0;x<Math.min(old.w,s);x++) gset(nv,x,y,gget(old,x,y));
-  ED.lv=nv; G.level=nv; G.runGrid=nv.grid; fitEditorCam();
-  toast('Grid resized to '+s+'×'+s);
+  const v=$('edSize').value;
+  $('edCustomWH').style.display=(v==='custom')?'flex':'none';
+  if(v==='custom') return;   // wait for SET button
+  const [w,h]=sizeFromSelect();
+  resizeGridTo(w,h);
 };
-$('edClear').onclick=()=>{ED.lv=freshEditorLevel(parseInt($('edSize').value));G.level=ED.lv;G.runGrid=ED.lv.grid;$('edDashMode').checked=false;toast('Cleared.');};
+$('edCustomGo').onclick=()=>{ SFX.click(); const [w,h]=sizeFromSelect(); resizeGridTo(w,h); };
+$('edClear').onclick=()=>{const [w,h]=sizeFromSelect();ED.lv=freshEditorLevel(w,h);G.level=ED.lv;G.runGrid=ED.lv.grid;$('edDashMode').checked=false;updateSizeLabel();toast('Cleared.');};
 function validateLevel(lv){
   let hasS=false,hasF=false;
   for(const c of lv.grid){if(c===CODES.START)hasS=true;if(c===CODES.FINISH)hasF=true;}
@@ -4365,10 +4421,13 @@ function openBossModal(){
     </div>
     <div id="bmCfg" style="${b?'':'display:none'}">
       <div style="font-size:11px;color:var(--dim);margin:6px 0 4px">CHOOSE YOUR BOSS</div>
-      <div style="display:flex;gap:8px;margin-bottom:10px">
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
         <button class="bmKind" data-k="malwrath">MALWRATH</button>
+        <button class="bmKind" data-k="cipheron">CIPHERON</button>
         <button class="bmKind" data-k="glitch">GLITCHLING</button>
         <button class="bmKind" data-k="brute">FIREWALL BRUTE</button>
+        <button class="bmKind" data-k="lockjaw">SENTINEL LOCKJAW</button>
+        <button class="bmKind" data-k="auditor">THE AUDITOR</button>
       </div>
       <div id="bmMal" style="display:none">
         <div class="setrow" style="width:auto"><span>WAVE 1 HP</span><input type="range" id="bmHp" min="8" max="40" step="2"><b id="bmHpV"></b></div>
@@ -4376,6 +4435,12 @@ function openBossModal(){
         <div class="setrow" style="width:auto"><span>WAVE 3 (grounded duel)</span><input type="checkbox" id="bmW3"></div>
         <div class="setrow" style="width:auto"><span>ATTACK SPEED</span>
           <select id="bmSpd"><option value="0.75">CALM</option><option value="1" selected>NORMAL</option><option value="1.35">OVERCLOCKED</option></select></div>
+      </div>
+      <div id="bmCiph" style="display:none">
+        <div style="font-size:10px;color:var(--dim);margin-bottom:6px">Runs the full 5-wave fight: flight → purge flood climb → zombie wardens → combined final → the plea. Waves 2-5 build their own arenas automatically.</div>
+        <div class="setrow" style="width:auto"><span>WAVE 1 HP</span><input type="range" id="bmCHp" min="8" max="40" step="2"><b id="bmCHpV"></b></div>
+        <div class="setrow" style="width:auto"><span>ATTACK SPEED</span>
+          <select id="bmCSpd"><option value="0.75">CALM</option><option value="1" selected>NORMAL</option><option value="1.35">OVERCLOCKED</option></select></div>
       </div>
       <div id="bmMini" style="display:none">
         <div class="setrow" style="width:auto"><span>BOSS HP (stomps)</span><input type="range" id="bmMhp" min="2" max="12"><b id="bmMhpV"></b></div>
@@ -4390,14 +4455,16 @@ function openBossModal(){
     $('bmCfg').style.display=bb?'block':'none';
     if(bb){
       $('bmMal').style.display=bb.kind==='malwrath'?'block':'none';
-      $('bmMini').style.display=bb.kind!=='malwrath'?'block':'none';
+      $('bmCiph').style.display=bb.kind==='cipheron'?'block':'none';
+      $('bmMini').style.display=(bb.kind!=='malwrath'&&bb.kind!=='cipheron')?'block':'none';
       $('bmHp').value=bb.hp; $('bmHpV').textContent=bb.hp;
       $('bmW2').checked=!!bb.w2; $('bmW3').checked=!!bb.w3; $('bmSpd').value=String(bb.spd);
+      $('bmCHp').value=bb.hp; $('bmCHpV').textContent=bb.hp; $('bmCSpd').value=String(bb.spd);
       $('bmMhp').value=bb.mhp; $('bmMhpV').textContent=bb.mhp; $('bmAggro').value=String(bb.aggro);
     }
   };
   $('bmObby').onclick=()=>{ if(ED.lv.boss){ ED.lv.boss=null;
-      ED.lv=freshEditorLevel(parseInt($('edSize').value)); G.level=ED.lv; G.runGrid=ED.lv.grid; fitEditorCam();
+      ED.lv=freshEditorLevel(...sizeFromSelect()); G.level=ED.lv; G.runGrid=ED.lv.grid; fitEditorCam();
       toast('Back to obby map — grid reset'); }
     $('bmObby').style.borderColor='var(--gold)'; $('bmBoss').style.borderColor='var(--edge)'; sync(); };
   $('bmBoss').onclick=()=>{ if(!ED.lv.boss){
@@ -4411,6 +4478,8 @@ function openBossModal(){
   $('bmW2').onchange=e=>ED.lv.boss.w2=e.target.checked?1:0;
   $('bmW3').onchange=e=>ED.lv.boss.w3=e.target.checked?1:0;
   $('bmSpd').onchange=e=>ED.lv.boss.spd=parseFloat(e.target.value);
+  $('bmCHp').oninput=e=>{ED.lv.boss.hp=parseInt(e.target.value);$('bmCHpV').textContent=e.target.value;};
+  $('bmCSpd').onchange=e=>ED.lv.boss.spd=parseFloat(e.target.value);
   $('bmMhp').oninput=e=>{ED.lv.boss.mhp=parseInt(e.target.value);$('bmMhpV').textContent=e.target.value;};
   $('bmAggro').onchange=e=>ED.lv.boss.aggro=parseFloat(e.target.value);
   $('bmClose').onclick=closeModal;
@@ -4434,7 +4503,7 @@ $('edShare').onclick=()=>{
   $('shareLoad').onclick=()=>{
     try{ const o=JSON.parse(atob($('shareTA').value.trim()));
       ED.lv=objToLevel(o); G.level=ED.lv; G.runGrid=ED.lv.grid;
-      $('edName').value=ED.lv.name; $('edSize').value=[10,25,40,55,80].includes(ED.lv.w)?ED.lv.w:$('edSize').value;
+      $('edName').value=ED.lv.name; setSizeSelectFor(ED.lv);
       fitEditorCam(); closeModal(); toast('Loaded "'+ED.lv.name+'"');
     }catch(e){toast('⚠ That code is corrupted (real corruption, not Malwrath).');}
   };
@@ -4539,7 +4608,7 @@ $('btnMyLevels').onclick=async()=>{
     enterEditor(false); ED.lv=objToLevel(o); G.level=ED.lv; G.runGrid=ED.lv.grid;
     $('edName').value=ED.lv.name; $('edWall').checked=!!ED.lv.wall; $('edWallSec').value=ED.lv.wallSec;
     $('edDashMode').checked=!!ED.lv.dashMode;
-    if([10,25,40,55,80].includes(ED.lv.w)) $('edSize').value=ED.lv.w;
+    setSizeSelectFor(ED.lv);
     fitEditorCam();
   });
   document.querySelectorAll('[data-del]').forEach(b=>b.onclick=async()=>{
@@ -4550,6 +4619,62 @@ $('btnMyLevels').onclick=async()=>{
 function openModal(html){$('modalInner').innerHTML=html;$('modal').classList.add('show');}
 function closeModal(){$('modal').classList.remove('show');}
 $('modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal();});
+
+function installableWorlds(storyI){
+  return STORIES[storyI].worlds.map((w,i)=>({i,w})).filter(x=>!x.w.boss);
+}
+function renderInstallModal(){
+  const storyI=parseInt($('instStory').value)||0;
+  const worlds=installableWorlds(storyI);
+  const worldSel=$('instWorld');
+  worldSel.innerHTML=worlds.map(x=>`<option value="${x.i}">${x.w.name}</option>`).join('');
+  renderInstallStages();
+}
+function renderInstallStages(){
+  const storyI=parseInt($('instStory').value)||0, worldI=parseInt($('instWorld').value)||0;
+  const world=STORIES[storyI].worlds[worldI];
+  const stageSel=$('instStage');
+  stageSel.innerHTML=world.stages.map((s,i)=>`<option value="${i}">Stage ${i+1}${G_stageOverrides[overrideKey(storyI,worldI,i)]?' — (your stage installed)':''}</option>`).join('');
+}
+$('edInstall').onclick=()=>{
+  SFX.click();
+  openModal(`<h3>&#128204; INSTALL AS CAMPAIGN STAGE</h3>
+    <div style="font-size:11px;color:var(--dim);margin-bottom:10px">Saves this level right into a World/Stage slot in the campaign — permanently, on this browser. It replaces the built-in stage there. You can revert it any time.</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <label style="font-size:11px;color:var(--dim)">STORY
+        <select id="instStory" style="width:100%">${STORIES.map((s,i)=>`<option value="${i}">${s.name}</option>`).join('')}</select>
+      </label>
+      <label style="font-size:11px;color:var(--dim)">WORLD
+        <select id="instWorld" style="width:100%"></select>
+      </label>
+      <label style="font-size:11px;color:var(--dim)">STAGE
+        <select id="instStage" style="width:100%"></select>
+      </label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button id="instRemove" class="danger">REMOVE OVERRIDE</button>
+      <button id="instGo" style="border-color:var(--gold)">INSTALL HERE</button>
+      <button id="instClose">CANCEL</button>
+    </div>`);
+  $('instStory').onchange=renderInstallModal;
+  $('instWorld').onchange=renderInstallStages;
+  renderInstallModal();
+  $('instGo').onclick=async()=>{
+    const storyI=parseInt($('instStory').value), worldI=parseInt($('instWorld').value), stageI=parseInt($('instStage').value);
+    G_stageOverrides[overrideKey(storyI,worldI,stageI)]=levelToObj(ED.lv);
+    await storeSet('obby-stage-overrides',G_stageOverrides);
+    SFX.win(); closeModal();
+    toast(`✓ Installed as ${STORIES[storyI].name.split(' — ')[0]}, ${STORIES[storyI].worlds[worldI].name} Stage ${stageI+1}`,3200);
+  };
+  $('instRemove').onclick=async()=>{
+    const storyI=parseInt($('instStory').value), worldI=parseInt($('instWorld').value), stageI=parseInt($('instStage').value);
+    delete G_stageOverrides[overrideKey(storyI,worldI,stageI)];
+    await storeSet('obby-stage-overrides',G_stageOverrides);
+    SFX.click(); renderInstallStages();
+    toast('Reverted to the built-in stage.',2000);
+  };
+  $('instClose').onclick=closeModal;
+};
 
 </script>
 </body>
