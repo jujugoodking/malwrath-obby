@@ -530,6 +530,14 @@ function tprop(x,y,key,fallback){
   const t=lv.tileProps[x+','+y];
   return (t&&t[key]!==undefined)?t[key]:fallback;
 }
+function portalAnchor(x,y,grid,w,h){
+  // walks down through a stack of vertically-adjacent PORTAL tiles to find the bottommost one
+  grid=grid||G.runGrid; w=w||(G.level&&G.level.w); h=h||(G.level&&G.level.h);
+  if(!grid) return [x,y];
+  let ay=y;
+  while(ay+1<h && grid[(ay+1)*w+x]===CODES.PORTAL) ay++;
+  return [x,ay];
+}
 function newLevel(w,h){ return {w,h,grid:new Uint8Array(w*h),wall:false,wallSec:45,name:'untitled',physics:defaultPhysics(),tileProps:{}}; }
 function gget(lv,x,y){ if(x<0||y<0||x>=lv.w||y>=lv.h) return 0; return lv.grid[y*lv.w+x]; }
 function gset(lv,x,y,v){ if(x<0||y<0||x>=lv.w||y>=lv.h) return; lv.grid[y*lv.w+x]=v; }
@@ -1264,7 +1272,7 @@ $('volSfx').oninput=e=>{ SET.sfx=e.target.value/100; saveSettings(); };
 $('volSfx').onchange=()=>SFX.jump();
 $('btnLowPower').onclick=()=>{ SET.lowPower=!SET.lowPower; syncSettingsUI(); saveSettings(); SFX.click(); };
 $('btnAutoRetry').onclick=()=>{ SET.autoRetry=!SET.autoRetry; syncSettingsUI(); saveSettings(); SFX.click(); };
-const GAME_VERSION=8;
+const GAME_VERSION=10;
 const VERSION_CHECK_URL='https://raw.githubusercontent.com/jujugoodking/malwrath-obby/main/version.json';
 const LIVE_GAME_URL='https://jujugoodking.github.io/malwrath-obby/';
 { const vn=$('verNum'); if(vn)vn.textContent=GAME_VERSION; }
@@ -1409,8 +1417,9 @@ $('btnResetProg').onclick=()=>{
 };
 
 /* ---------- player ---------- */
-function makePlayer(x,y){ return {x,y,w:22,h:28,vx:0,vy:0,grounded:false,coyote:0,jbuf:0,face:1,inv:0,dead:false,deadT:0,onMover:null,squish:0,air:1,run:0}; }
+function makePlayer(x,y){ return {x,y,w:22,h:28,vx:0,vy:0,grounded:false,coyote:0,jbuf:0,face:1,inv:0,dead:false,deadT:0,onMover:null,squish:0,air:1,run:0,dashT:0,dashPower:DEFAULT_DASH_POWER}; }
 const PLAYER_SIZE={normal:[22,28],dash:[22,28],mini:[8,10]};
+const DEFAULT_DASH_POWER=32;
 function setPlayerMode(mode){
   const p=G.player; if(!p) { G.playerMode=mode; return; }
   const [ow,oh]=PLAYER_SIZE[G.playerMode]||PLAYER_SIZE.normal;
@@ -1475,9 +1484,11 @@ function updateKeysDoorsCrumbles(){
   {
     const gx=Math.floor((p.x+p.w/2)/T), gy=Math.floor((p.y+p.h/2)/T);
     if(gx>=0&&gx<lv.w&&gy>=0&&gy<lv.h&&G.runGrid[gy*lv.w+gx]===CODES.PORTAL){
-      const mode=tprop(gx,gy,'mode','dash');
-      if(G.playerMode!==mode){
+      const [ax,ay]=portalAnchor(gx,gy,G.runGrid,lv.w,lv.h);
+      const mode=tprop(ax,ay,'mode','dash');
+      if(G.playerMode!==mode || (mode==='dash' && p.dashPower!==tprop(ax,ay,'dashPower',DEFAULT_DASH_POWER))){
         setPlayerMode(mode);
+        if(mode==='dash') p.dashPower=tprop(ax,ay,'dashPower',DEFAULT_DASH_POWER);
         SFX.core(); G.shake=4;
         spawnParts(p.x+p.w/2,p.y+p.h/2,mode==='dash'?'#5ce1ff':(mode==='mini'?'#ff8ad0':'#7cff4f'),18,4);
         toast(mode==='dash'?'⚡ DASH MODE':(mode==='mini'?'🔹 MINI MODE':'↩ NORMAL MODE'),1600);
@@ -1856,7 +1867,8 @@ function updatePlay(){
   if(cv2) p.vx=clamp(p.vx+cv2, -8, 8);
   const ACC=ice?ice.accel:0.7;
   const MAX=(4.2 + Math.min(p.run,150)/150*2.4) * (G.playerMode==='mini'?0.68:1);
-  if(left()){ p.run=(p.face===-1)?p.run+1:0; p.vx=Math.max(p.vx-ACC,-MAX); p.face=-1; }
+  if(p.dashT>0){ p.dashT--; }
+  else if(left()){ p.run=(p.face===-1)?p.run+1:0; p.vx=Math.max(p.vx-ACC,-MAX); p.face=-1; }
   else if(right()){ p.run=(p.face===1)?p.run+1:0; p.vx=Math.min(p.vx+ACC,MAX); p.face=1; }
   else { p.run=0; p.vx*=p.grounded?(ice?ice.friction:0.72):0.9; }
   if(Math.abs(p.vx)<0.05)p.vx=0;
@@ -1869,7 +1881,8 @@ function updatePlay(){
   if(p.jbuf>0 && (p.coyote>0 || p.air>0)){
     if(G.playerMode==='dash'){
       p.air--; p.jbuf=0; p.coyote=0;
-      p.vx=p.face*16; p.vy=-4.8; p.inv=Math.max(p.inv,14); p.squish=6;
+      const dp2=p.dashPower||DEFAULT_DASH_POWER;
+      p.vx=p.face*dp2; p.vy=-(dp2*0.3); p.dashT=Math.round(dp2*0.6); p.inv=Math.max(p.inv,14); p.squish=6;
       spawnParts(p.x+p.w/2,p.y+p.h/2,'#5ce1ff',16,4); SFX.dash();
     } else {
       const airJump = p.coyote<=0;
@@ -2576,7 +2589,8 @@ function drawTile(c,px,py,gxx,gyy){
     cx.strokeRect(px+0.5,py+0.5,T-1,T-1);
     if(G.frame%30<3){ cx.globalAlpha=0.3; cx.fillStyle='#ff5d5d'; cx.fillRect(px,py,T,T); cx.globalAlpha=1; }
   } else if(c===CODES.PORTAL){
-    const mode=tprop(gxx,gyy,'mode','dash');
+    const [ax,ay]=portalAnchor(gxx,gyy);
+    const mode=tprop(ax,ay,'mode','dash');
     const col=mode==='dash'?'#5ce1ff':(mode==='mini'?'#ff8ad0':'#7cff4f');
     const cxp=px+T/2, cyp=py+T/2;
     for(let i=0;i<3;i++){
@@ -2690,9 +2704,11 @@ function drawPlayer(){
   const sq=p.squish>0?2:0;
   cx.save(); cx.translate(p.x+p.w/2,p.y+p.h);
   cx.scale(1+sq*0.03,1-sq*0.05);
-  // body
-  cx.fillStyle='#57d9a3'; cx.fillRect(-p.w/2,-p.h,p.w,p.h);
-  cx.fillStyle='#2fa87a'; cx.fillRect(-p.w/2,-8,p.w,8);
+  // body — tinted to match the current mode (normal/dash/mini)
+  const MODE_COL={normal:['#57d9a3','#2fa87a'],dash:['#5ce1ff','#2f9ad9'],mini:['#ff8ad0','#d95fa8']};
+  const [bodyCol,footCol]=MODE_COL[G.playerMode]||MODE_COL.normal;
+  cx.fillStyle=bodyCol; cx.fillRect(-p.w/2,-p.h,p.w,p.h);
+  cx.fillStyle=footCol; cx.fillRect(-p.w/2,-8,p.w,8);
   // face
   cx.fillStyle='#10241c';
   const ex=p.face*3;
@@ -3043,7 +3059,8 @@ function updateBoss(){
   // player movement (same as play: momentum + double jump)
   const ice=p.grounded&&onIce(p);
   const ACC=ice?ice.accel:0.7, MAX=(4.2+Math.min(p.run,150)/150*2.4)*(G.playerMode==='mini'?0.68:1);
-  if(left()){ p.run=(p.face===-1)?p.run+1:0; p.vx=Math.max(p.vx-ACC,-MAX); p.face=-1; }
+  if(p.dashT>0){ p.dashT--; }
+  else if(left()){ p.run=(p.face===-1)?p.run+1:0; p.vx=Math.max(p.vx-ACC,-MAX); p.face=-1; }
   else if(right()){ p.run=(p.face===1)?p.run+1:0; p.vx=Math.min(p.vx+ACC,MAX); p.face=1; }
   else { p.run=0; p.vx*=p.grounded?(ice?ice.friction:0.72):0.9; }
   if(jumpHeld()){if(!p._jheld)p.jbuf=7;p._jheld=true;}else{p._jheld=false;if(G.playerMode!=='dash'&&p.vy<-4&&!(p.bounceT>0))p.vy=-4;}
@@ -3053,7 +3070,8 @@ function updateBoss(){
   if(p.jbuf>0&&(p.coyote>0||p.air>0)){
     if(G.playerMode==='dash'){
       p.air--;p.jbuf=0;p.coyote=0;
-      p.vx=p.face*16;p.vy=-4.8;p.inv=Math.max(p.inv,14);
+      const dp2=p.dashPower||DEFAULT_DASH_POWER;
+      p.vx=p.face*dp2;p.vy=-(dp2*0.3);p.dashT=Math.round(dp2*0.6);p.inv=Math.max(p.inv,14);
       spawnParts(p.x+p.w/2,p.y+p.h/2,'#5ce1ff',16,4);SFX.dash();
     } else {
       const aj=p.coyote<=0;
@@ -4569,9 +4587,10 @@ function openBossModal(){
 $('edBoss').onclick=()=>{SFX.click();openBossModal();};
 function openTileSettingsModal(){
   if(ED.selX==null){ toast('Select a block first with the 🎯 SELECT tool',2400); return; }
-  const x=ED.selX,y=ED.selY, lv=ED.lv;
+  let x=ED.selX,y=ED.selY; const lv=ED.lv;
   if(x>=lv.w||y>=lv.h){ toast('That tile is outside the current grid — select another.',2400); return; }
   const code=lv.grid[y*lv.w+x];
+  if(code===CODES.PORTAL){ [x,y]=portalAnchor(x,y,lv.grid,lv.w,lv.h); }
   const key=x+','+y;
   lv.tileProps=lv.tileProps||{};
   const cur=lv.tileProps[key]||{};
@@ -4635,10 +4654,16 @@ function openTileSettingsModal(){
     };
   } else if(code===CODES.PORTAL){
     body=`<div class="setrow" style="width:auto"><span>SENDS PLAYER TO</span>
-      <select id="tpSel"><option value="normal">NORMAL</option><option value="dash">DASH MODE</option><option value="mini">MINI MODE</option></select></div>`;
+      <select id="tpSel"><option value="normal">NORMAL</option><option value="dash">DASH MODE</option><option value="mini">MINI MODE</option></select></div>
+      <div class="setrow" style="width:auto" id="tpPowRow"><span>LAUNCH POWER<br><span style="font-size:10px;color:var(--dim)">how far the dash launches you</span></span><input type="range" id="tpVal" min="14" max="60" step="2"><b id="tpValV"></b></div>`;
     afterOpen=()=>{
       $('tpSel').value=cur.mode||'dash';
-      $('tpSel').onchange=e=>set('mode',e.target.value);
+      const v=cur.dashPower??DEFAULT_DASH_POWER;
+      $('tpVal').value=v; $('tpValV').textContent=v;
+      const syncPowRow=()=>{ $('tpPowRow').style.display=$('tpSel').value==='dash'?'flex':'none'; };
+      $('tpSel').onchange=e=>{ set('mode',e.target.value); syncPowRow(); };
+      $('tpVal').oninput=e=>{ set('dashPower',parseInt(e.target.value)); $('tpValV').textContent=e.target.value; };
+      syncPowRow();
     };
   } else {
     body=`<div style="font-size:12px;color:var(--dim);padding:10px 0">This block type doesn't have configurable settings. Select a bounce pad, ice, belt, crumble, corruption, mover, enemy, or portal tile instead.</div>`;
@@ -4715,6 +4740,7 @@ function paintAt(px,py){
     for(let i=0;i<lv.grid.length;i++)if(lv.grid[i]===ED.tool)lv.grid[i]=0;
   }
   gset(lv,gxx,gyy,ED.tool);
+  if(ED.tool===CODES.PORTAL && gyy-1>=0) gset(lv,gxx,gyy-1,CODES.PORTAL);   // portals are 2 tiles tall
 }
 function renderEditorWorld(){
   cx.restore(); // undo cam translate from render(); editor uses its own transform
