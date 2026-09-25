@@ -310,7 +310,7 @@
     </label>
   </div>
   <div id="edPalette"></div>
-  <div id="edHint">paint: click/drag • erase: right-click • pan: SPACE+drag / middle • zoom: wheel</div>
+  <div id="edHint">paint: click/drag • erase: right-click • pan: SPACE+drag / middle • zoom: wheel • multi-select: SHIFT+click</div>
 </div>
 
 <!-- MODAL -->
@@ -1272,7 +1272,7 @@ $('volSfx').oninput=e=>{ SET.sfx=e.target.value/100; saveSettings(); };
 $('volSfx').onchange=()=>SFX.jump();
 $('btnLowPower').onclick=()=>{ SET.lowPower=!SET.lowPower; syncSettingsUI(); saveSettings(); SFX.click(); };
 $('btnAutoRetry').onclick=()=>{ SET.autoRetry=!SET.autoRetry; syncSettingsUI(); saveSettings(); SFX.click(); };
-const GAME_VERSION=10;
+const GAME_VERSION=12;
 const VERSION_CHECK_URL='https://raw.githubusercontent.com/jujugoodking/malwrath-obby/main/version.json';
 const LIVE_GAME_URL='https://jujugoodking.github.io/malwrath-obby/';
 { const vn=$('verNum'); if(vn)vn.textContent=GAME_VERSION; }
@@ -1914,9 +1914,15 @@ function updatePlay(){
     const c=tileAt(cxp,cyp);
     if(c===CODES.SPIKE){ const inTileY=cyp-Math.floor(cyp/T)*T; if(inTileY>10){hurtPlayer('spike');break;} }
   }
-  // corruption block — solid, but hurts on contact (standing on it, walking into it, from any side)
-  const touchPts=[[hb.x-2,hb.y+hb.h/2],[hb.x+hb.w+2,hb.y+hb.h/2],[hb.x+hb.w/2,hb.y-2],[hb.x+hb.w/2,hb.y+hb.h+2]];
-  for(const [tx,ty] of touchPts){ if(tileAt(tx,ty)===CODES.CORRUPT){ hurtPlayer('corrupt'); break; } }
+  // corruption block — solid, but instantly lethal on contact from any side (standing on it, walking into it, underneath it)
+  {
+    const cTouch =
+      tileAt(p.x-1, p.y+p.h/2)===CODES.CORRUPT ||
+      tileAt(p.x+p.w+1, p.y+p.h/2)===CODES.CORRUPT ||
+      tileAt(p.x+p.w/2, p.y-1)===CODES.CORRUPT ||
+      tileAt(p.x+p.w/2, p.y+p.h+1)===CODES.CORRUPT;
+    if(cTouch && p.inv<=0 && !p.dead){ G.lives=Math.min(G.lives,1); hurtPlayer('corrupt'); }
+  }
 
   // enemies — patrol, but chase (and hop after) the player when they get close
   for(const en of G.enemies){
@@ -4375,7 +4381,7 @@ function drawBossOverlays(){
 const ED={
   lv:null, tool:1, blockset:2, cam:{x:0,y:0}, zoom:1, panning:false, lastPX:0,lastPY:0,
   painting:0, // 0 none, 1 paint, 2 erase
-  selX:null, selY:null,
+  selTiles:[],
 };
 const PALETTE=[
   {c:CODES.BLOCK, n:'BLOCK', col:'#3f7d4a'},
@@ -4425,7 +4431,7 @@ function enterEditor(fresh=true){
   G.mode='editor'; G.source='editorTest';
   $('editorUI').classList.add('show');
   if(fresh||!ED.lv){ ED.lv=freshEditorLevel(...sizeFromSelect()); fitEditorCam();
-    $('edWall').checked=false; ED.selX=null; ED.selY=null; }
+    $('edWall').checked=false; ED.selTiles=[]; }
   G.level=ED.lv; G.runGrid=ED.lv.grid;
   G.enemies=[];G.movers=[];G.parts=[];G.friend=null;G.wallActive=false;G.mini=null;G.mbul=[];
   buildPalette();
@@ -4462,7 +4468,7 @@ function resizeGridTo(w,h){
     if(ox<w && oy<h) nv.tileProps[k]=old.tileProps[k];
   }
   ED.lv=nv; G.level=nv; G.runGrid=nv.grid; fitEditorCam();
-  ED.selX=null; ED.selY=null;
+  ED.selTiles=[];
   updateSizeLabel();
   toast('Grid resized to '+w+'×'+h);
 }
@@ -4476,7 +4482,7 @@ $('edSize').onchange=()=>{
   resizeGridTo(w,h);
 };
 $('edCustomGo').onclick=()=>{ SFX.click(); const [w,h]=sizeFromSelect(); resizeGridTo(w,h); };
-$('edClear').onclick=()=>{const [w,h]=sizeFromSelect();ED.lv=freshEditorLevel(w,h);G.level=ED.lv;G.runGrid=ED.lv.grid;ED.selX=null;ED.selY=null;updateSizeLabel();toast('Cleared.');};
+$('edClear').onclick=()=>{const [w,h]=sizeFromSelect();ED.lv=freshEditorLevel(w,h);G.level=ED.lv;G.runGrid=ED.lv.grid;ED.selTiles=[];updateSizeLabel();toast('Cleared.');};
 function validateLevel(lv){
   let hasS=false,hasF=false;
   for(const c of lv.grid){if(c===CODES.START)hasS=true;if(c===CODES.FINISH)hasF=true;}
@@ -4563,13 +4569,13 @@ function openBossModal(){
     }
   };
   $('bmObby').onclick=()=>{ if(ED.lv.boss){ ED.lv.boss=null;
-      ED.lv=freshEditorLevel(...sizeFromSelect()); G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selX=null; ED.selY=null; fitEditorCam();
+      ED.lv=freshEditorLevel(...sizeFromSelect()); G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selTiles=[]; fitEditorCam();
       toast('Back to obby map — grid reset'); }
     $('bmObby').style.borderColor='var(--gold)'; $('bmBoss').style.borderColor='var(--edge)'; sync(); };
   $('bmBoss').onclick=()=>{ if(!ED.lv.boss){
       ED.lv=bossArenaBase();
       ED.lv.boss={kind:'malwrath',hp:24,w2:1,w3:1,spd:1,mhp:5,aggro:1};
-      G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selX=null; ED.selY=null; fitEditorCam();
+      G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selTiles=[]; fitEditorCam();
       toast('BOSS ARENA — '+BOSS_ARENA_W+'×'+BOSS_ARENA_H+' grid ready'); }
     $('bmBoss').style.borderColor='var(--gold)'; $('bmObby').style.borderColor='var(--edge)'; sync(); };
   document.querySelectorAll('.bmKind').forEach(x=>x.onclick=()=>{ if(ED.lv.boss){ED.lv.boss.kind=x.dataset.k; SFX.click(); sync();} });
@@ -4586,16 +4592,27 @@ function openBossModal(){
 }
 $('edBoss').onclick=()=>{SFX.click();openBossModal();};
 function openTileSettingsModal(){
-  if(ED.selX==null){ toast('Select a block first with the 🎯 SELECT tool',2400); return; }
-  let x=ED.selX,y=ED.selY; const lv=ED.lv;
-  if(x>=lv.w||y>=lv.h){ toast('That tile is outside the current grid — select another.',2400); return; }
-  const code=lv.grid[y*lv.w+x];
-  if(code===CODES.PORTAL){ [x,y]=portalAnchor(x,y,lv.grid,lv.w,lv.h); }
-  const key=x+','+y;
+  if(!ED.selTiles.length){ toast('Select a block first with the 🎯 SELECT tool',2400); return; }
+  const lv=ED.lv;
+  // resolve every selection to an in-bounds, anchor-resolved (x,y), then dedupe
+  const seen=new Set(); const resolved=[];
+  for(const t of ED.selTiles){
+    if(t.x<0||t.y<0||t.x>=lv.w||t.y>=lv.h) continue;
+    const c=lv.grid[t.y*lv.w+t.x];
+    let x=t.x,y=t.y;
+    if(c===CODES.PORTAL){ [x,y]=portalAnchor(x,y,lv.grid,lv.w,lv.h); }
+    const k=x+','+y;
+    if(!seen.has(k)){ seen.add(k); resolved.push({x,y,code:lv.grid[y*lv.w+x]}); }
+  }
+  if(!resolved.length){ toast('Those tiles are outside the current grid — select another.',2400); return; }
+  const code=resolved[0].code;
+  const targets=resolved.filter(t=>t.code===code);   // settings only apply to tiles matching the first one's type
+  const skipped=resolved.length-targets.length;
   lv.tileProps=lv.tileProps||{};
+  const key=targets[0].x+','+targets[0].y;
   const cur=lv.tileProps[key]||{};
   const dp=defaultPhysics();
-  const set=(k,v)=>{ lv.tileProps[key]=lv.tileProps[key]||{}; lv.tileProps[key][k]=v; };
+  const set=(k,v)=>{ for(const t of targets){ const tk=t.x+','+t.y; lv.tileProps[tk]=lv.tileProps[tk]||{}; lv.tileProps[tk][k]=v; } };
 
   let body='', afterOpen=null;
   if(code===CODES.BOUNCE){
@@ -4670,13 +4687,17 @@ function openTileSettingsModal(){
   }
 
   const tileName=(PALETTE.find(p=>p.c===code)||{n:'EMPTY'}).n.replace(/&#\d+;/g,'').trim();
+  const countTxt = targets.length===1
+    ? `Editing this one ${tileName} tile at (${targets[0].x}, ${targets[0].y}).`
+    : `Editing ${targets.length} ${tileName} tiles at once.`;
+  const skipTxt = skipped ? ` (${skipped} other selected tile${skipped>1?'s':''} of a different type ${skipped>1?'were':'was'} skipped.)` : '';
   openModal(`<h3>&#9881; BLOCK SETTINGS</h3>
-    <div style="font-size:11px;color:var(--dim);margin-bottom:10px">Editing just this one ${tileName} tile at (${x}, ${y}) — not the whole level.</div>
+    <div style="font-size:11px;color:var(--dim);margin-bottom:10px">${countTxt}${skipTxt}</div>
     ${body}
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
-      <button id="tpReset">RESET THIS TILE</button><button id="tpClose">DONE</button></div>`);
+      <button id="tpReset">RESET ${targets.length>1?'THESE TILES':'THIS TILE'}</button><button id="tpClose">DONE</button></div>`);
   if(afterOpen) afterOpen();
-  $('tpReset').onclick=()=>{ delete lv.tileProps[key]; closeModal(); toast('Reset to defaults.'); };
+  $('tpReset').onclick=()=>{ for(const t of targets) delete lv.tileProps[t.x+','+t.y]; closeModal(); toast('Reset to defaults.'); };
   $('tpClose').onclick=closeModal;
 }
 $('edPhysics').onclick=()=>{SFX.click();openTileSettingsModal();};
@@ -4696,7 +4717,7 @@ $('edShare').onclick=()=>{
       <button id="shareLoad">LOAD FROM CODE</button><button id="shareClose">CLOSE</button></div>`);
   $('shareLoad').onclick=()=>{
     try{ const o=JSON.parse(atob($('shareTA').value.trim()));
-      ED.lv=objToLevel(o); G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selX=null; ED.selY=null;
+      ED.lv=objToLevel(o); G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selTiles=[];
       $('edName').value=ED.lv.name; setSizeSelectFor(ED.lv);
       fitEditorCam(); closeModal(); toast('Loaded "'+ED.lv.name+'"');
     }catch(e){toast('⚠ That code is corrupted (real corruption, not Malwrath).');}
@@ -4712,13 +4733,13 @@ cv.addEventListener('pointerdown',e=>{
   if(G.mode!=='editor')return;
   if(e.button===1||spaceDown){ED.panning=true;ED.lastPX=e.clientX;ED.lastPY=e.clientY;return;}
   ED.painting=e.button===2?2:1;
-  paintAt(e.clientX,e.clientY);
+  paintAt(e.clientX,e.clientY,e.shiftKey,true);
 });
 cv.addEventListener('pointermove',e=>{
   if(G.mode!=='editor')return;
   if(ED.panning){ED.cam.x-=(e.clientX-ED.lastPX)/ED.zoom;ED.cam.y-=(e.clientY-ED.lastPY)/ED.zoom;
     ED.lastPX=e.clientX;ED.lastPY=e.clientY;return;}
-  if(ED.painting)paintAt(e.clientX,e.clientY);
+  if(ED.painting)paintAt(e.clientX,e.clientY,e.shiftKey,false);
 });
 addEventListener('pointerup',()=>{ED.painting=0;ED.panning=false;});
 cv.addEventListener('wheel',e=>{
@@ -4729,12 +4750,22 @@ cv.addEventListener('wheel',e=>{
   const wx=ED.cam.x+e.clientX/oz, wy=ED.cam.y+e.clientY/oz;
   ED.cam.x=wx-e.clientX/ED.zoom; ED.cam.y=wy-e.clientY/ED.zoom;
 },{passive:false});
-function paintAt(px,py){
+function selHas(x,y){ return ED.selTiles.some(t=>t.x===x&&t.y===y); }
+function selToggle(x,y){
+  const i=ED.selTiles.findIndex(t=>t.x===x&&t.y===y);
+  if(i>=0) ED.selTiles.splice(i,1); else ED.selTiles.push({x,y});
+}
+function paintAt(px,py,shift,isDown){
   const wx=ED.cam.x+px/ED.zoom, wy=ED.cam.y+py/ED.zoom;
   const gxx=Math.floor(wx/T), gyy=Math.floor(wy/T);
   const lv=ED.lv;
   if(gxx<0||gyy<0||gxx>=lv.w||gyy>=lv.h)return;
-  if(ED.tool==='select'){ ED.selX=gxx; ED.selY=gyy; SFX.click(); return; }
+  if(ED.tool==='select'){
+    if(!shift){ ED.selTiles=[{x:gxx,y:gyy}]; }
+    else if(isDown){ selToggle(gxx,gyy); }
+    else if(!selHas(gxx,gyy)){ ED.selTiles.push({x:gxx,y:gyy}); }
+    SFX.click(); return;
+  }
   if(ED.painting===2||ED.tool===-1){gset(lv,gxx,gyy,0);return;}
   if(ED.tool===CODES.START||ED.tool===CODES.FINISH){ // only one allowed
     for(let i=0;i<lv.grid.length;i++)if(lv.grid[i]===ED.tool)lv.grid[i]=0;
@@ -4783,12 +4814,20 @@ function renderEditorWorld(){
     else if(c===CODES.FINISH){drawFinishAt(x,y);}
   }
   cx.strokeStyle='#57d9a3'; cx.strokeRect(0,0,lv.w*T,lv.h*T);
-  if(ED.selX!=null && ED.selX>=0 && ED.selX<lv.w && ED.selY>=0 && ED.selY<lv.h){
-    const sx2=ED.selX*T, sy2=ED.selY*T;
+  if(ED.selTiles.length){
     cx.strokeStyle='#ffd54f'; cx.lineWidth=3;
     cx.setLineDash([4,3]); cx.lineDashOffset=-G.frame/2;
-    cx.strokeRect(sx2-1,sy2-1,T+2,T+2);
+    for(const t of ED.selTiles){
+      if(t.x<0||t.x>=lv.w||t.y<0||t.y>=lv.h)continue;
+      cx.strokeRect(t.x*T-1,t.y*T-1,T+2,T+2);
+    }
     cx.setLineDash([]); cx.lineWidth=1;
+    if(ED.selTiles.length>1){
+      const t0=ED.selTiles[0];
+      cx.fillStyle='#ffd54f'; cx.font='bold 11px monospace'; cx.textAlign='center';
+      cx.fillText(ED.selTiles.length+' selected', t0.x*T+16, t0.y*T-6);
+      cx.textAlign='left';
+    }
   }
   cx.restore();
   cx.save(); // rebalance for the restore in render()
@@ -4819,7 +4858,7 @@ $('btnMyLevels').onclick=async()=>{
   });
   document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{
     const o=G.customList[+b.dataset.edit]; closeModal();
-    enterEditor(false); ED.lv=objToLevel(o); G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selX=null; ED.selY=null;
+    enterEditor(false); ED.lv=objToLevel(o); G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selTiles=[];
     $('edName').value=ED.lv.name; $('edWall').checked=!!ED.lv.wall; $('edWallSec').value=ED.lv.wallSec;
     setSizeSelectFor(ED.lv);
     fitEditorCam();
