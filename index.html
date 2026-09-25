@@ -303,12 +303,10 @@
     <button id="edShare">SHARE CODE</button>
     <button id="edBoss" style="border-color:var(--bad)">&#9760; BOSS</button>
     <button id="edBlockset">&#9646; BLOCKS: STORY 2</button>
+    <button id="edPhysics" style="border-color:var(--sky)">&#9881; BLOCK SETTINGS</button>
     <label style="font-size:11px;color:var(--dim);display:flex;align-items:center;gap:4px">
       <input type="checkbox" id="edWall"> corruption timer
       <input type="text" id="edWallSec" value="45" style="width:36px;padding:4px" > s
-    </label>
-    <label style="font-size:11px;color:var(--dim);display:flex;align-items:center;gap:4px">
-      <input type="checkbox" id="edDashMode"> DASH MODE (jump = dash)
     </label>
   </div>
   <div id="edPalette"></div>
@@ -329,8 +327,8 @@
    OBBYTOWN vs MALWRATH — single-file 2D obby + editor + boss
    ========================================================= */
 const T = 32;
-const CODES = {EMPTY:0, BLOCK:1, CIRCLE:2, SLAB:3, SPIKE:4, ENEMY:5, HMOVE:6, VMOVE:7, BOUNCE:8, START:9, FINISH:10, ICE:11, KEY:12, DOOR:13, CRUMBLE:14, CONVL:15, CONVR:16, GHOST:17};
-const CHAR2CODE = {'.':0,'#':1,'o':2,'=':3,'^':4,'E':5,'M':6,'V':7,'B':8,'S':9,'F':10,'I':11,'K':12,'D':13,'C':14,'<':15,'>':16,'G':17,' ':0};
+const CODES = {EMPTY:0, BLOCK:1, CIRCLE:2, SLAB:3, SPIKE:4, ENEMY:5, HMOVE:6, VMOVE:7, BOUNCE:8, START:9, FINISH:10, ICE:11, KEY:12, DOOR:13, CRUMBLE:14, CONVL:15, CONVR:16, GHOST:17, CORRUPT:18, PORTAL:19};
+const CHAR2CODE = {'.':0,'#':1,'o':2,'=':3,'^':4,'E':5,'M':6,'V':7,'B':8,'S':9,'F':10,'I':11,'K':12,'D':13,'C':14,'<':15,'>':16,'G':17,'X':18,'P':19,' ':0};
 
 const cv = document.getElementById('game');
 const cx = cv.getContext('2d');
@@ -525,7 +523,14 @@ async function storeSet(k,v){
 const memStore={};
 
 /* ---------- level model ---------- */
-function newLevel(w,h){ return {w,h,grid:new Uint8Array(w*h),wall:false,wallSec:45,name:'untitled'}; }
+function defaultPhysics(){ return {convSpeed:0.28, crumbleTime:26, crumbleRespawn:190, corruptSpreads:0, iceAccel:0.22, iceFriction:0.985, bounceVel:19.5, moverAmp:2.5}; }
+function LP(){ return (G.level&&G.level.physics)||defaultPhysics(); }
+function tprop(x,y,key,fallback){
+  const lv=G.level; if(!lv||!lv.tileProps) return fallback;
+  const t=lv.tileProps[x+','+y];
+  return (t&&t[key]!==undefined)?t[key]:fallback;
+}
+function newLevel(w,h){ return {w,h,grid:new Uint8Array(w*h),wall:false,wallSec:45,name:'untitled',physics:defaultPhysics(),tileProps:{}}; }
 function gget(lv,x,y){ if(x<0||y<0||x>=lv.w||y>=lv.h) return 0; return lv.grid[y*lv.w+x]; }
 function gset(lv,x,y,v){ if(x<0||y<0||x>=lv.w||y>=lv.h) return; lv.grid[y*lv.w+x]=v; }
 function parseAscii(rows,opts={}){
@@ -534,8 +539,8 @@ function parseAscii(rows,opts={}){
   for(let y=0;y<h;y++)for(let x=0;x<rows[y].length;x++) lv.grid[y*w+x]=CHAR2CODE[rows[y][x]]??0;
   Object.assign(lv,opts); return lv;
 }
-function levelToObj(lv){return {w:lv.w,h:lv.h,g:Array.from(lv.grid),wall:lv.wall,wallSec:lv.wallSec,name:lv.name,boss:lv.boss||null,dashMode:!!lv.dashMode};}
-function objToLevel(o){const lv=newLevel(o.w,o.h);lv.grid.set(o.g);lv.wall=!!o.wall;lv.wallSec=o.wallSec||45;lv.name=o.name||'untitled';lv.boss=o.boss||null;lv.dashMode=!!o.dashMode;return lv;}
+function levelToObj(lv){return {w:lv.w,h:lv.h,g:Array.from(lv.grid),wall:lv.wall,wallSec:lv.wallSec,name:lv.name,boss:lv.boss||null,physics:lv.physics||defaultPhysics(),tileProps:lv.tileProps||{}};}
+function objToLevel(o){const lv=newLevel(o.w,o.h);lv.grid.set(o.g);lv.wall=!!o.wall;lv.wallSec=o.wallSec||45;lv.name=o.name||'untitled';lv.boss=o.boss||null;lv.physics=Object.assign(defaultPhysics(),o.physics||{});lv.tileProps=o.tileProps||{};return lv;}
 
 /* =========================================================
    CAMPAIGN MAPS
@@ -1259,7 +1264,7 @@ $('volSfx').oninput=e=>{ SET.sfx=e.target.value/100; saveSettings(); };
 $('volSfx').onchange=()=>SFX.jump();
 $('btnLowPower').onclick=()=>{ SET.lowPower=!SET.lowPower; syncSettingsUI(); saveSettings(); SFX.click(); };
 $('btnAutoRetry').onclick=()=>{ SET.autoRetry=!SET.autoRetry; syncSettingsUI(); saveSettings(); SFX.click(); };
-const GAME_VERSION=6;
+const GAME_VERSION=8;
 const VERSION_CHECK_URL='https://raw.githubusercontent.com/jujugoodking/malwrath-obby/main/version.json';
 const LIVE_GAME_URL='https://jujugoodking.github.io/malwrath-obby/';
 { const vn=$('verNum'); if(vn)vn.textContent=GAME_VERSION; }
@@ -1405,11 +1410,23 @@ $('btnResetProg').onclick=()=>{
 
 /* ---------- player ---------- */
 function makePlayer(x,y){ return {x,y,w:22,h:28,vx:0,vy:0,grounded:false,coyote:0,jbuf:0,face:1,inv:0,dead:false,deadT:0,onMover:null,squish:0,air:1,run:0}; }
+const PLAYER_SIZE={normal:[22,28],dash:[22,28],mini:[8,10]};
+function setPlayerMode(mode){
+  const p=G.player; if(!p) { G.playerMode=mode; return; }
+  const [ow,oh]=PLAYER_SIZE[G.playerMode]||PLAYER_SIZE.normal;
+  const [nw,nh]=PLAYER_SIZE[mode]||PLAYER_SIZE.normal;
+  if(ow!==nw||oh!==nh){
+    p.x += (ow-nw)/2;      // keep horizontally centered
+    p.y += (oh-nh);        // keep feet planted (resize from the bottom)
+    p.w=nw; p.h=nh;
+  }
+  G.playerMode=mode;
+}
 
 /* ---------- stage loading ---------- */
 function loadStage(lv,src){
   G.source=src; G.level=lv; G.enemies=[]; G.movers=[]; G.parts=[]; G.friend=null;
-  G.wallActive=false; G.wall=null; G.freeze=0; G._clearing=false;
+  G.wallActive=false; G.wall=null; G.freeze=0; G._clearing=false; G._corruptT=0;
   G.paused=false; $('pauseWrap').classList.remove('show');
   $('glitch').style.display='none';
   let sx=1,sy=1, fx=-1,fy=-1;
@@ -1421,11 +1438,14 @@ function loadStage(lv,src){
     else if(c===CODES.ENEMY){grid[y*lv.w+x]=0;
       const variedWorld = G.story===1 && G.world===1;   // STEELCASE VAULTS — new enemy variety lives here
       const kind = variedWorld ? (x+y)%3 : 0;
-      G.enemies.push({x:x*T+4,y:y*T+8,w:24,h:24,vx:1.1,vy:0,dir:Math.random()<.5?-1:1,dead:false,t:Math.random()*99,
-        kind, fx:x*T+4, fy:y*T+8, chargeT:0, chargeCd:60+Math.random()*90});
+      const size = tprop(x,y,'size','normal');
+      const scl = size==='mini'?0.5:(size==='big'?1.6:1);
+      const spdMul = size==='mini'?1.35:(size==='big'?0.72:1);
+      G.enemies.push({x:x*T+4,y:y*T+8,w:24*scl,h:24*scl,vx:1.1*spdMul,vy:0,dir:Math.random()<.5?-1:1,dead:false,t:Math.random()*99,
+        kind, size, spdMul, fx:x*T+4, fy:y*T+8, chargeT:0, chargeCd:60+Math.random()*90});
     }
-    else if(c===CODES.HMOVE){grid[y*lv.w+x]=0;G.movers.push({x:x*T,y:y*T,w:T*1.6,h:12,ox:x*T,oy:y*T,axis:'x',amp:T*2.5,ph:x*.7,dx:0,dy:0});}
-    else if(c===CODES.VMOVE){grid[y*lv.w+x]=0;G.movers.push({x:x*T,y:y*T,w:T*1.6,h:12,ox:x*T,oy:y*T,axis:'y',amp:T*2.5,ph:y*.7,dx:0,dy:0});}
+    else if(c===CODES.HMOVE){grid[y*lv.w+x]=0;G.movers.push({x:x*T,y:y*T,w:T*1.6,h:12,ox:x*T,oy:y*T,axis:'x',amp:T*tprop(x,y,'moverAmp',LP().moverAmp),ph:x*.7,dx:0,dy:0});}
+    else if(c===CODES.VMOVE){grid[y*lv.w+x]=0;G.movers.push({x:x*T,y:y*T,w:T*1.6,h:12,ox:x*T,oy:y*T,axis:'y',amp:T*tprop(x,y,'moverAmp',LP().moverAmp),ph:y*.7,dx:0,dy:0});}
   }
   G.runGrid=grid;
   G.keys=[]; G.keyCount=0; G.crumbles={};
@@ -1439,18 +1459,31 @@ function loadStage(lv,src){
   if(src==='campaign'){
     const wt=WORLDS[G.world].time;
     G.timeLeft=wt*60; G.timerMax=wt*60; G.useWall=true;
-    G.dashMode=false;
+    setPlayerMode('normal');
     G.friend={x:fx*T-2, y:fy*T-26, saved:false};
     if(G.stage===4 && G.story!==1 && G.world<2) spawnMini(G.world);
     if(G.stage===4 && G.story===1 && (G.world===1||G.world===3)) spawnMini2(G.world===1?2:3);
   } else {
     G.useWall=!!lv.wall; G.timeLeft=(lv.wallSec||45)*60; G.timerMax=G.timeLeft;
-    G.dashMode=!!lv.dashMode;
+    setPlayerMode('normal');
   }
   updateHUD();
 }
 function updateKeysDoorsCrumbles(){
   const p=G.player, lv=G.level; if(!p||p.dead) return;
+  // portals — touch to switch player mode (normal/dash/mini), configured per-portal
+  {
+    const gx=Math.floor((p.x+p.w/2)/T), gy=Math.floor((p.y+p.h/2)/T);
+    if(gx>=0&&gx<lv.w&&gy>=0&&gy<lv.h&&G.runGrid[gy*lv.w+gx]===CODES.PORTAL){
+      const mode=tprop(gx,gy,'mode','dash');
+      if(G.playerMode!==mode){
+        setPlayerMode(mode);
+        SFX.core(); G.shake=4;
+        spawnParts(p.x+p.w/2,p.y+p.h/2,mode==='dash'?'#5ce1ff':(mode==='mini'?'#ff8ad0':'#7cff4f'),18,4);
+        toast(mode==='dash'?'⚡ DASH MODE':(mode==='mini'?'🔹 MINI MODE':'↩ NORMAL MODE'),1600);
+      }
+    }
+  }
   // keys
   for(const k of G.keys||[]){
     if(!k.taken && Math.abs(p.x+p.w/2-k.x)<24 && Math.abs(p.y+p.h/2-k.y)<26){
@@ -1493,12 +1526,32 @@ function updateKeysDoorsCrumbles(){
   }
   for(const idx in G.crumbles){
     const c=G.crumbles[idx]; c.t++;
-    if(c.state==='shake' && c.t>=26){
+    const cx2=idx%lv.w, cy2=Math.floor(idx/lv.w);
+    if(c.state==='shake' && c.t>=tprop(cx2,cy2,'crumbleTime',LP().crumbleTime)){
       c.state='gone'; c.t=0; G.runGrid[idx]=0;
-      const x=(idx%lv.w)*T, y=Math.floor(idx/lv.w)*T;
+      const x=cx2*T, y=cy2*T;
       spawnParts(x+16,y+16,'#c9a06a',10,3); SFX.stomp();
-    } else if(c.state==='gone' && c.t>=190){
+    } else if(c.state==='gone' && c.t>=tprop(cx2,cy2,'crumbleRespawn',LP().crumbleRespawn)){
       G.runGrid[idx]=CODES.CRUMBLE; delete G.crumbles[idx];
+    }
+  }
+  // corruption spread — slowly consumes adjacent solid blocks, per-tile toggle
+  G._corruptT=(G._corruptT||0)+1;
+  if(G._corruptT>=180){
+    G._corruptT=0;
+    const w=lv.w,h=lv.h, cells=[];
+    for(let i=0;i<G.runGrid.length;i++) if(G.runGrid[i]===CODES.CORRUPT) cells.push(i);
+    for(const idx of cells){
+      const x=idx%w, y=(idx/w)|0;
+      if(!tprop(x,y,'corruptSpreads',LP().corruptSpreads)) continue;
+      if(Math.random()>0.18) continue;
+      const neigh=[[x+1,y],[x-1,y],[x,y+1],[x,y-1]].filter(([nx,ny])=>nx>=0&&nx<w&&ny>=0&&ny<h);
+      const targets=neigh.filter(([nx,ny])=>G.runGrid[ny*w+nx]===CODES.BLOCK);
+      if(targets.length){
+        const [tx,ty]=targets[(Math.random()*targets.length)|0];
+        G.runGrid[ty*w+tx]=CODES.CORRUPT;
+        spawnParts(tx*T+16,ty*T+16,'#ff5d5d',10,3);
+      }
     }
   }
 }
@@ -1508,8 +1561,8 @@ function convUnder(p){
   const lv=G.level;
   for(let x=x0;x<=x1;x++){ if(x<0||x>=lv.w||y<0||y>=lv.h)continue;
     const c=G.runGrid[y*lv.w+x];
-    if(c===CODES.CONVL) return -1;
-    if(c===CODES.CONVR) return 1; }
+    if(c===CODES.CONVL) return -tprop(x,y,'convSpeed',LP().convSpeed);
+    if(c===CODES.CONVR) return tprop(x,y,'convSpeed',LP().convSpeed); }
   return 0;
 }
 function onIce(p){
@@ -1517,8 +1570,8 @@ function onIce(p){
   const x0=Math.floor((p.x+3)/T), x1=Math.floor((p.x+p.w-3)/T);
   const lv=G.level;
   for(let x=x0;x<=x1;x++){ if(x<0||x>=lv.w||y<0||y>=lv.h)continue;
-    if(G.runGrid[y*lv.w+x]===CODES.ICE) return true; }
-  return false;
+    if(G.runGrid[y*lv.w+x]===CODES.ICE) return {accel:tprop(x,y,'iceAccel',LP().iceAccel), friction:tprop(x,y,'iceFriction',LP().iceFriction)}; }
+  return null;
 }
 function tileAt(x,y){ // pixel coords -> run grid code
   const gx=Math.floor(x/T), gy=Math.floor(y/T);
@@ -1528,7 +1581,7 @@ function tileAt(x,y){ // pixel coords -> run grid code
 function solidAt(gxx,gyy){ const lv=G.level; if(gxx<0||gxx>=lv.w) return true; if(gyy<0||gyy>=lv.h) return false;
   const c=G.runGrid[gyy*lv.w+gxx];
   if(c===CODES.GHOST) return ghostOn();
-  return c===CODES.BLOCK||c===CODES.CIRCLE||c===CODES.ICE||c===CODES.DOOR||c===CODES.CRUMBLE||c===CODES.CONVL||c===CODES.CONVR; }
+  return c===CODES.BLOCK||c===CODES.CIRCLE||c===CODES.ICE||c===CODES.DOOR||c===CODES.CRUMBLE||c===CODES.CONVL||c===CODES.CONVR||c===CODES.CORRUPT; }
 function ghostOn(){ return (G.frame%240)<150; }
 
 /* ---------- physics ---------- */
@@ -1556,7 +1609,7 @@ function moveEntity(e,isPlayer){
       else {
         const c=(gxx>=0&&gxx<G.level.w&&y1>=0&&y1<G.level.h)?G.runGrid[y1*G.level.w+gxx]:0;
         if(c===CODES.SLAB){ const top=y1*T+2; if(e.y+e.h-e.vy<=top+2){ e.y=top-e.h; e.vy=0; e.grounded=true; } }
-        if(c===CODES.BOUNCE && isPlayer){ const top=y1*T+14; if(e.y+e.h>=top){ e.y=top-e.h; e.vy=-19.5; e.bounceT=40; e.air=1; SFX.bounce(); spawnParts(e.x+e.w/2,e.y+e.h,'#ffd54f',10); } }
+        if(c===CODES.BOUNCE && isPlayer){ const top=y1*T+14; if(e.y+e.h>=top){ e.y=top-e.h; e.vy=-tprop(gxx,y1,'bounceVel',LP().bounceVel); e.bounceT=40; e.air=1; SFX.bounce(); spawnParts(e.x+e.w/2,e.y+e.h,'#ffd54f',10); } }
         if(c===CODES.BOUNCE && !isPlayer){ if(e.y+e.h>=y1*T+14){e.y=y1*T+14-e.h;e.vy=-9;} }
       }
     } else if(e.vy<0){
@@ -1610,7 +1663,7 @@ function resolveDeath(){
 function updateHUD(){
   $('hudLeft').textContent = (G.source==='campaign'
     ? (G.mode==='boss' ? ('FINAL — '+(B.skin==='ciph'?'CIPHERON':'MALWRATH')) : `P${(G.story||0)+1} W${G.world+1}-${G.stage+1}  ${WORLDS[G.world].name}`)
-    : (G.source==='editorTest'?'TEST MODE':'CUSTOM: '+(G.level?.name||''))) + (G.dashMode?'  ⚡DASH MODE':'');
+    : (G.source==='editorTest'?'TEST MODE':'CUSTOM: '+(G.level?.name||''))) + (G.playerMode==='dash'?'  ⚡DASH MODE':(G.playerMode==='mini'?'  🔹MINI MODE':''));
   $('lives').innerHTML='&#9829;'.repeat(Math.max(0,G.lives))+'<span style="opacity:.25">'+'&#9829;'.repeat(Math.max(0,maxLives()-G.lives))+'</span>';
   const anyKeys=(G.keys&&G.keys.length)||G.keyCount>0;
   $('keybox').style.display=anyKeys?'block':'none';
@@ -1800,29 +1853,30 @@ function updatePlay(){
   // controls — speed builds the longer you keep moving one direction
   const ice=p.grounded&&onIce(p);
   const cv2=p.grounded?convUnder(p):0;
-  if(cv2) p.vx=clamp(p.vx+cv2*0.28, -8, 8);
-  const ACC=ice?0.22:0.7;
-  const MAX=4.2 + Math.min(p.run,150)/150*2.4;   // 4.2 → 6.6 after ~2.5s of running
+  if(cv2) p.vx=clamp(p.vx+cv2, -8, 8);
+  const ACC=ice?ice.accel:0.7;
+  const MAX=(4.2 + Math.min(p.run,150)/150*2.4) * (G.playerMode==='mini'?0.68:1);
   if(left()){ p.run=(p.face===-1)?p.run+1:0; p.vx=Math.max(p.vx-ACC,-MAX); p.face=-1; }
   else if(right()){ p.run=(p.face===1)?p.run+1:0; p.vx=Math.min(p.vx+ACC,MAX); p.face=1; }
-  else { p.run=0; p.vx*=p.grounded?(ice?0.985:0.72):0.9; }
+  else { p.run=0; p.vx*=p.grounded?(ice?ice.friction:0.72):0.9; }
   if(Math.abs(p.vx)<0.05)p.vx=0;
   if(p.run>140 && G.frame%4===0 && p.grounded) spawnParts(p.x+p.w/2-p.face*10,p.y+p.h-4,'#8fe8c0',1,1.2); // speed trail
 
-  if(jumpHeld()){ if(!p._jheld) p.jbuf=7; p._jheld=true; } else { p._jheld=false; if(!G.dashMode && p.vy<-4 && !(p.bounceT>0)) p.vy=-4; }
+  if(jumpHeld()){ if(!p._jheld) p.jbuf=7; p._jheld=true; } else { p._jheld=false; if(G.playerMode!=='dash' && p.vy<-4 && !(p.bounceT>0)) p.vy=-4; }
   if(p.bounceT>0)p.bounceT--;
   if(p.jbuf>0)p.jbuf--;
   if(p.grounded){ p.coyote=7; p.air=1; p.bounceT=0; } else if(p.coyote>0)p.coyote--;
   if(p.jbuf>0 && (p.coyote>0 || p.air>0)){
-    if(G.dashMode){
+    if(G.playerMode==='dash'){
       p.air--; p.jbuf=0; p.coyote=0;
-      p.vx=p.face*11.5; p.vy*=0.35; p.inv=Math.max(p.inv,10); p.squish=6;
-      spawnParts(p.x+p.w/2,p.y+p.h/2,'#5ce1ff',10,3); SFX.dash();
+      p.vx=p.face*16; p.vy=-4.8; p.inv=Math.max(p.inv,14); p.squish=6;
+      spawnParts(p.x+p.w/2,p.y+p.h/2,'#5ce1ff',16,4); SFX.dash();
     } else {
       const airJump = p.coyote<=0;
+      const jMul = G.playerMode==='mini'?0.5:1;
       if(airJump){ p.air--; spawnParts(p.x+p.w/2,p.y+p.h,'#7cff4f',8,2.2); }
       else spawnParts(p.x+p.w/2,p.y+p.h,'#8fa0c0',4,1.5);
-      p.vy=airJump?-10.4:-11.2; p.jbuf=0; p.coyote=0; SFX.jump(); p.squish=6;
+      p.vy=(airJump?-10.4:-11.2)*jMul; p.jbuf=0; p.coyote=0; SFX.jump(); p.squish=6;
     }
   }
 
@@ -1847,6 +1901,9 @@ function updatePlay(){
     const c=tileAt(cxp,cyp);
     if(c===CODES.SPIKE){ const inTileY=cyp-Math.floor(cyp/T)*T; if(inTileY>10){hurtPlayer('spike');break;} }
   }
+  // corruption block — solid, but hurts on contact (standing on it, walking into it, from any side)
+  const touchPts=[[hb.x-2,hb.y+hb.h/2],[hb.x+hb.w+2,hb.y+hb.h/2],[hb.x+hb.w/2,hb.y-2],[hb.x+hb.w/2,hb.y+hb.h+2]];
+  for(const [tx,ty] of touchPts){ if(tileAt(tx,ty)===CODES.CORRUPT){ hurtPlayer('corrupt'); break; } }
 
   // enemies — patrol, but chase (and hop after) the player when they get close
   for(const en of G.enemies){
@@ -1854,17 +1911,18 @@ function updatePlay(){
     en.t++; en.hopCd=(en.hopCd||0)-1;
     const edx=(p.x+p.w/2)-(en.x+en.w/2), edy=(p.y+p.h/2)-(en.y+en.h/2);
     if(en.kind===1){ // FLYER — hovers and bobs, drifts toward the player when close, ignores gravity entirely
+      const sm=en.spdMul||1;
       en.fx=en.fx??en.x; en.fy=en.fy??en.y;
       const near = !p.dead && Math.abs(edx)<260 && Math.abs(edy)<180;
-      const tx = near ? clamp(p.x-en.fx, -70,70) : Math.sin(en.t/50)*36;
-      const ty = near ? clamp(p.y-en.fy, -50,50) : Math.cos(en.t/40)*22;
+      const tx = near ? clamp(p.x-en.fx, -70,70)*sm : Math.sin(en.t/50)*36*sm;
+      const ty = near ? clamp(p.y-en.fy, -50,50)*sm : Math.cos(en.t/40)*22*sm;
       en.x = en.fx + tx + Math.sin(en.t/12)*3;
       en.y = en.fy + ty;
       en.dir = edx>0?1:-1;
       en.grounded=false;
     } else if(en.kind===2){ // CHARGER — waits, then telegraphs and dashes hard at the player
       en.chargeCd--;
-      if(en.chargeT>0){ en.chargeT--; en.vx=en.dir*7.2; if(en.chargeT===0){ en.chargeCd=90+Math.random()*70; } }
+      if(en.chargeT>0){ en.chargeT--; en.vx=en.dir*7.2*(en.spdMul||1); if(en.chargeT===0){ en.chargeCd=90+Math.random()*70; } }
       else {
         en.vx=0;
         if(!p.dead && Math.abs(edx)<200 && Math.abs(edy)<70 && en.chargeCd<=0){
@@ -1873,10 +1931,10 @@ function updatePlay(){
       }
       moveEntity(en,false);
     } else { // default ground patroller — unchanged
-      let spd=1.0;
+      let spd=1.0*(en.spdMul||1);
       if(!p.dead && Math.abs(edx)<230 && Math.abs(edy)<96){ en.alert=20; en.dir=edx>0?1:-1; }
       if(en.alert>0){
-        en.alert--; spd=1.7;
+        en.alert--; spd=1.7*(en.spdMul||1);
         if(en.grounded && en.hopCd<=0 && edy<-24 && Math.abs(edx)<130){ en.vy=-8.2; en.hopCd=75; }
       }
       en.vx=en.dir*spd;
@@ -2506,6 +2564,30 @@ function drawTile(c,px,py,gxx,gyy){
     if(!on){ cx.strokeStyle='rgba(215,204,255,.8)'; cx.setLineDash([4,4]);
       cx.strokeRect(px+1.5,py+1.5,T-3,T-3); cx.setLineDash([]); }
     cx.globalAlpha=1;
+  } else if(c===CODES.CORRUPT){
+    const jx=(G.frame%7<2)?rnd(-1,1):0, jy=(G.frame%11<2)?rnd(-1,1):0;
+    cx.fillStyle='#0a0a0a'; cx.fillRect(px+jx,py+jy,T,T);
+    cx.fillStyle='rgba(255,93,93,.65)'; cx.font='11px monospace';
+    for(let i=0;i<3;i++){
+      const gx2=px+4+((i*11+G.frame/3)%22), gy2=py+9+((i*9)%18);
+      cx.fillText(((i+G.frame)>>2)%2?'1':'0',gx2,gy2);
+    }
+    cx.strokeStyle=(G.frame%20<10)?'#ff5d5d':'#7cff4f';
+    cx.strokeRect(px+0.5,py+0.5,T-1,T-1);
+    if(G.frame%30<3){ cx.globalAlpha=0.3; cx.fillStyle='#ff5d5d'; cx.fillRect(px,py,T,T); cx.globalAlpha=1; }
+  } else if(c===CODES.PORTAL){
+    const mode=tprop(gxx,gyy,'mode','dash');
+    const col=mode==='dash'?'#5ce1ff':(mode==='mini'?'#ff8ad0':'#7cff4f');
+    const cxp=px+T/2, cyp=py+T/2;
+    for(let i=0;i<3;i++){
+      const r=6+i*6+Math.sin(G.frame*0.08+i)*2;
+      cx.strokeStyle=col; cx.globalAlpha=0.75-i*0.2; cx.lineWidth=2;
+      cx.beginPath(); cx.ellipse(cxp,cyp,r*0.55,r,G.frame*0.03+i,0,7); cx.stroke();
+    }
+    cx.globalAlpha=1; cx.lineWidth=1;
+    cx.fillStyle=col; cx.font='bold 8px monospace'; cx.textAlign='center';
+    cx.fillText(mode==='dash'?'DASH':(mode==='mini'?'MINI':'NORM'), cxp, py+T-3);
+    cx.textAlign='left';
   } else if(c===CODES.BOUNCE){
     cx.fillStyle='#8a5a2b'; cx.fillRect(px+2,py+22,T-4,10);
     cx.fillStyle='#ffd54f'; cx.fillRect(px+2,py+14,T-4,8);
@@ -2960,23 +3042,24 @@ function updateBoss(){
 
   // player movement (same as play: momentum + double jump)
   const ice=p.grounded&&onIce(p);
-  const ACC=ice?0.22:0.7, MAX=4.2+Math.min(p.run,150)/150*2.4;
+  const ACC=ice?ice.accel:0.7, MAX=(4.2+Math.min(p.run,150)/150*2.4)*(G.playerMode==='mini'?0.68:1);
   if(left()){ p.run=(p.face===-1)?p.run+1:0; p.vx=Math.max(p.vx-ACC,-MAX); p.face=-1; }
   else if(right()){ p.run=(p.face===1)?p.run+1:0; p.vx=Math.min(p.vx+ACC,MAX); p.face=1; }
-  else { p.run=0; p.vx*=p.grounded?(ice?0.985:0.72):0.9; }
-  if(jumpHeld()){if(!p._jheld)p.jbuf=7;p._jheld=true;}else{p._jheld=false;if(!G.dashMode&&p.vy<-4&&!(p.bounceT>0))p.vy=-4;}
+  else { p.run=0; p.vx*=p.grounded?(ice?ice.friction:0.72):0.9; }
+  if(jumpHeld()){if(!p._jheld)p.jbuf=7;p._jheld=true;}else{p._jheld=false;if(G.playerMode!=='dash'&&p.vy<-4&&!(p.bounceT>0))p.vy=-4;}
   if(p.bounceT>0)p.bounceT--;
   if(p.jbuf>0)p.jbuf--;
   if(p.grounded){p.coyote=7;p.air=1;p.bounceT=0;}else if(p.coyote>0)p.coyote--;
   if(p.jbuf>0&&(p.coyote>0||p.air>0)){
-    if(G.dashMode){
+    if(G.playerMode==='dash'){
       p.air--;p.jbuf=0;p.coyote=0;
-      p.vx=p.face*11.5;p.vy*=0.35;p.inv=Math.max(p.inv,10);
-      spawnParts(p.x+p.w/2,p.y+p.h/2,'#5ce1ff',10,3);SFX.dash();
+      p.vx=p.face*16;p.vy=-4.8;p.inv=Math.max(p.inv,14);
+      spawnParts(p.x+p.w/2,p.y+p.h/2,'#5ce1ff',16,4);SFX.dash();
     } else {
       const aj=p.coyote<=0;
+      const jMul=G.playerMode==='mini'?0.5:1;
       if(aj){p.air--;spawnParts(p.x+p.w/2,p.y+p.h,'#7cff4f',8,2.2);}
-      p.vy=aj?-10.4:-11.2;p.jbuf=0;p.coyote=0;SFX.jump();
+      p.vy=(aj?-10.4:-11.2)*jMul;p.jbuf=0;p.coyote=0;SFX.jump();
     }
   }
   moveEntity(p,true);
@@ -4274,6 +4357,7 @@ function drawBossOverlays(){
 const ED={
   lv:null, tool:1, blockset:2, cam:{x:0,y:0}, zoom:1, panning:false, lastPX:0,lastPY:0,
   painting:0, // 0 none, 1 paint, 2 erase
+  selX:null, selY:null,
 };
 const PALETTE=[
   {c:CODES.BLOCK, n:'BLOCK', col:'#3f7d4a'},
@@ -4291,11 +4375,14 @@ const PALETTE=[
   {c:CODES.CONVL, n:'BELT &#8592;',col:'#4a5566'},
   {c:CODES.CONVR, n:'BELT &#8594;',col:'#4a5566'},
   {c:CODES.GHOST, n:'GHOST', col:'#b09fe6'},
+  {c:CODES.CORRUPT, n:'CORRUPTION', col:'#0a0a0a'},
+  {c:CODES.PORTAL, n:'PORTAL', col:'#5ce1ff'},
   {c:CODES.START, n:'START', col:'#57d9a3'},
   {c:CODES.FINISH,n:'FINISH',col:'#ffffff'},
   {c:-1,          n:'ERASER',col:'#20242e'},
+  {c:'select',    n:'&#127919; SELECT',col:'#ffd54f'},
 ];
-const STORY2_TILES=[CODES.KEY,CODES.DOOR,CODES.CRUMBLE,CODES.CONVL,CODES.CONVR,CODES.GHOST];
+const STORY2_TILES=[CODES.KEY,CODES.DOOR,CODES.CRUMBLE,CODES.CONVL,CODES.CONVR,CODES.GHOST,CODES.CORRUPT,CODES.PORTAL];
 function buildPalette(){
   const box=$('edPalette'); box.innerHTML='';
   const pal=(ED.blockset===1)?PALETTE.filter(p=>!STORY2_TILES.includes(p.c)):PALETTE;
@@ -4320,7 +4407,7 @@ function enterEditor(fresh=true){
   G.mode='editor'; G.source='editorTest';
   $('editorUI').classList.add('show');
   if(fresh||!ED.lv){ ED.lv=freshEditorLevel(...sizeFromSelect()); fitEditorCam();
-    $('edWall').checked=false; $('edDashMode').checked=false; }
+    $('edWall').checked=false; ED.selX=null; ED.selY=null; }
   G.level=ED.lv; G.runGrid=ED.lv.grid;
   G.enemies=[];G.movers=[];G.parts=[];G.friend=null;G.wallActive=false;G.mini=null;G.mbul=[];
   buildPalette();
@@ -4349,7 +4436,15 @@ function resizeGridTo(w,h){
   const old=ED.lv, nv=freshEditorLevel(w,h);
   nv.grid.fill(0);
   for(let y=0;y<Math.min(old.h,h);y++)for(let x=0;x<Math.min(old.w,w);x++) gset(nv,x,y,gget(old,x,y));
+  nv.name=old.name; nv.wall=old.wall; nv.wallSec=old.wallSec; nv.boss=old.boss;
+  nv.physics=old.physics||defaultPhysics();
+  nv.tileProps={};
+  for(const k in (old.tileProps||{})){
+    const [ox,oy]=k.split(',').map(Number);
+    if(ox<w && oy<h) nv.tileProps[k]=old.tileProps[k];
+  }
   ED.lv=nv; G.level=nv; G.runGrid=nv.grid; fitEditorCam();
+  ED.selX=null; ED.selY=null;
   updateSizeLabel();
   toast('Grid resized to '+w+'×'+h);
 }
@@ -4363,7 +4458,7 @@ $('edSize').onchange=()=>{
   resizeGridTo(w,h);
 };
 $('edCustomGo').onclick=()=>{ SFX.click(); const [w,h]=sizeFromSelect(); resizeGridTo(w,h); };
-$('edClear').onclick=()=>{const [w,h]=sizeFromSelect();ED.lv=freshEditorLevel(w,h);G.level=ED.lv;G.runGrid=ED.lv.grid;$('edDashMode').checked=false;updateSizeLabel();toast('Cleared.');};
+$('edClear').onclick=()=>{const [w,h]=sizeFromSelect();ED.lv=freshEditorLevel(w,h);G.level=ED.lv;G.runGrid=ED.lv.grid;ED.selX=null;ED.selY=null;updateSizeLabel();toast('Cleared.');};
 function validateLevel(lv){
   let hasS=false,hasF=false;
   for(const c of lv.grid){if(c===CODES.START)hasS=true;if(c===CODES.FINISH)hasF=true;}
@@ -4375,7 +4470,6 @@ $('edTest').onclick=()=>{
   if(!validateLevel(ED.lv))return;
   SFX.click();
   ED.lv.wall=$('edWall').checked; ED.lv.wallSec=clamp(parseInt($('edWallSec').value)||45,5,600);
-  ED.lv.dashMode=$('edDashMode').checked;
   $('editorUI').classList.remove('show');
   startCustomStage(ED.lv,'editorTest');
   toast('TEST MODE — ESC to pause, quit returns to editor.');
@@ -4383,7 +4477,7 @@ $('edTest').onclick=()=>{
 $('edSave').onclick=async()=>{
   if(!validateLevel(ED.lv))return;
   const name=($('edName').value.trim()||'my stage');
-  ED.lv.name=name; ED.lv.wall=$('edWall').checked; ED.lv.wallSec=clamp(parseInt($('edWallSec').value)||45,5,600); ED.lv.dashMode=$('edDashMode').checked;
+  ED.lv.name=name; ED.lv.wall=$('edWall').checked; ED.lv.wallSec=clamp(parseInt($('edWallSec').value)||45,5,600);
   const obj=levelToObj(ED.lv);
   const i=G.customList.findIndex(l=>l.name===name);
   if(i>=0)G.customList[i]=obj; else G.customList.push(obj);
@@ -4451,13 +4545,13 @@ function openBossModal(){
     }
   };
   $('bmObby').onclick=()=>{ if(ED.lv.boss){ ED.lv.boss=null;
-      ED.lv=freshEditorLevel(...sizeFromSelect()); G.level=ED.lv; G.runGrid=ED.lv.grid; fitEditorCam();
+      ED.lv=freshEditorLevel(...sizeFromSelect()); G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selX=null; ED.selY=null; fitEditorCam();
       toast('Back to obby map — grid reset'); }
     $('bmObby').style.borderColor='var(--gold)'; $('bmBoss').style.borderColor='var(--edge)'; sync(); };
   $('bmBoss').onclick=()=>{ if(!ED.lv.boss){
       ED.lv=bossArenaBase();
       ED.lv.boss={kind:'malwrath',hp:24,w2:1,w3:1,spd:1,mhp:5,aggro:1};
-      G.level=ED.lv; G.runGrid=ED.lv.grid; fitEditorCam();
+      G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selX=null; ED.selY=null; fitEditorCam();
       toast('BOSS ARENA — '+BOSS_ARENA_W+'×'+BOSS_ARENA_H+' grid ready'); }
     $('bmBoss').style.borderColor='var(--gold)'; $('bmObby').style.borderColor='var(--edge)'; sync(); };
   document.querySelectorAll('.bmKind').forEach(x=>x.onclick=()=>{ if(ED.lv.boss){ED.lv.boss.kind=x.dataset.k; SFX.click(); sync();} });
@@ -4473,6 +4567,94 @@ function openBossModal(){
   sync();
 }
 $('edBoss').onclick=()=>{SFX.click();openBossModal();};
+function openTileSettingsModal(){
+  if(ED.selX==null){ toast('Select a block first with the 🎯 SELECT tool',2400); return; }
+  const x=ED.selX,y=ED.selY, lv=ED.lv;
+  if(x>=lv.w||y>=lv.h){ toast('That tile is outside the current grid — select another.',2400); return; }
+  const code=lv.grid[y*lv.w+x];
+  const key=x+','+y;
+  lv.tileProps=lv.tileProps||{};
+  const cur=lv.tileProps[key]||{};
+  const dp=defaultPhysics();
+  const set=(k,v)=>{ lv.tileProps[key]=lv.tileProps[key]||{}; lv.tileProps[key][k]=v; };
+
+  let body='', afterOpen=null;
+  if(code===CODES.BOUNCE){
+    body=`<div class="setrow" style="width:auto"><span>BOUNCE HEIGHT</span><input type="range" id="tpVal" min="10" max="28" step="1"><b id="tpValV"></b></div>`;
+    afterOpen=()=>{
+      const v=cur.bounceVel??dp.bounceVel;
+      $('tpVal').value=v; $('tpValV').textContent=v;
+      $('tpVal').oninput=e=>{set('bounceVel',parseInt(e.target.value)); $('tpValV').textContent=e.target.value;};
+    };
+  } else if(code===CODES.ICE){
+    body=`<div class="setrow" style="width:auto"><span>SLIPPERINESS</span><input type="range" id="tpVal" min="0.94" max="0.996" step="0.002"><b id="tpValV"></b></div>
+          <div class="setrow" style="width:auto"><span>ACCELERATION</span><input type="range" id="tpVal2" min="0.08" max="0.5" step="0.02"><b id="tpVal2V"></b></div>`;
+    afterOpen=()=>{
+      const v=cur.iceFriction??dp.iceFriction, v2=cur.iceAccel??dp.iceAccel;
+      $('tpVal').value=v; $('tpValV').textContent=v.toFixed(3);
+      $('tpVal2').value=v2; $('tpVal2V').textContent=v2.toFixed(2);
+      $('tpVal').oninput=e=>{set('iceFriction',parseFloat(e.target.value)); $('tpValV').textContent=parseFloat(e.target.value).toFixed(3);};
+      $('tpVal2').oninput=e=>{set('iceAccel',parseFloat(e.target.value)); $('tpVal2V').textContent=parseFloat(e.target.value).toFixed(2);};
+    };
+  } else if(code===CODES.CONVL||code===CODES.CONVR){
+    body=`<div class="setrow" style="width:auto"><span>BELT SPEED</span><input type="range" id="tpVal" min="0.1" max="0.6" step="0.02"><b id="tpValV"></b></div>`;
+    afterOpen=()=>{
+      const v=cur.convSpeed??dp.convSpeed;
+      $('tpVal').value=v; $('tpValV').textContent=v.toFixed(2);
+      $('tpVal').oninput=e=>{set('convSpeed',parseFloat(e.target.value)); $('tpValV').textContent=parseFloat(e.target.value).toFixed(2);};
+    };
+  } else if(code===CODES.CRUMBLE){
+    body=`<div class="setrow" style="width:auto"><span>BREAK SPEED</span><input type="range" id="tpVal" min="8" max="60" step="2"><b id="tpValV"></b></div>
+          <div class="setrow" style="width:auto"><span>RESPAWN TIME</span><input type="range" id="tpVal2" min="60" max="400" step="10"><b id="tpVal2V"></b></div>`;
+    afterOpen=()=>{
+      const v=cur.crumbleTime??dp.crumbleTime, v2=cur.crumbleRespawn??dp.crumbleRespawn;
+      $('tpVal').value=v; $('tpValV').textContent=v;
+      $('tpVal2').value=v2; $('tpVal2V').textContent=v2;
+      $('tpVal').oninput=e=>{set('crumbleTime',parseInt(e.target.value)); $('tpValV').textContent=e.target.value;};
+      $('tpVal2').oninput=e=>{set('crumbleRespawn',parseInt(e.target.value)); $('tpVal2V').textContent=e.target.value;};
+    };
+  } else if(code===CODES.CORRUPT){
+    body=`<div class="setrow" style="width:auto"><span>SPREADS TO NEARBY BLOCKS</span><input type="checkbox" id="tpChk"></div>`;
+    afterOpen=()=>{
+      $('tpChk').checked=!!(cur.corruptSpreads??dp.corruptSpreads);
+      $('tpChk').onchange=e=>set('corruptSpreads',e.target.checked?1:0);
+    };
+  } else if(code===CODES.HMOVE||code===CODES.VMOVE){
+    body=`<div class="setrow" style="width:auto"><span>TRAVEL RANGE</span><input type="range" id="tpVal" min="1" max="6" step="0.25"><b id="tpValV"></b></div>`;
+    afterOpen=()=>{
+      const v=cur.moverAmp??dp.moverAmp;
+      $('tpVal').value=v; $('tpValV').textContent=v+' tiles';
+      $('tpVal').oninput=e=>{set('moverAmp',parseFloat(e.target.value)); $('tpValV').textContent=e.target.value+' tiles';};
+    };
+  } else if(code===CODES.ENEMY){
+    body=`<div class="setrow" style="width:auto"><span>SIZE</span>
+      <select id="tpSel"><option value="mini">MINI</option><option value="normal">NORMAL</option><option value="big">BIG</option></select></div>`;
+    afterOpen=()=>{
+      $('tpSel').value=cur.size||'normal';
+      $('tpSel').onchange=e=>set('size',e.target.value);
+    };
+  } else if(code===CODES.PORTAL){
+    body=`<div class="setrow" style="width:auto"><span>SENDS PLAYER TO</span>
+      <select id="tpSel"><option value="normal">NORMAL</option><option value="dash">DASH MODE</option><option value="mini">MINI MODE</option></select></div>`;
+    afterOpen=()=>{
+      $('tpSel').value=cur.mode||'dash';
+      $('tpSel').onchange=e=>set('mode',e.target.value);
+    };
+  } else {
+    body=`<div style="font-size:12px;color:var(--dim);padding:10px 0">This block type doesn't have configurable settings. Select a bounce pad, ice, belt, crumble, corruption, mover, enemy, or portal tile instead.</div>`;
+  }
+
+  const tileName=(PALETTE.find(p=>p.c===code)||{n:'EMPTY'}).n.replace(/&#\d+;/g,'').trim();
+  openModal(`<h3>&#9881; BLOCK SETTINGS</h3>
+    <div style="font-size:11px;color:var(--dim);margin-bottom:10px">Editing just this one ${tileName} tile at (${x}, ${y}) — not the whole level.</div>
+    ${body}
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+      <button id="tpReset">RESET THIS TILE</button><button id="tpClose">DONE</button></div>`);
+  if(afterOpen) afterOpen();
+  $('tpReset').onclick=()=>{ delete lv.tileProps[key]; closeModal(); toast('Reset to defaults.'); };
+  $('tpClose').onclick=closeModal;
+}
+$('edPhysics').onclick=()=>{SFX.click();openTileSettingsModal();};
 $('edBlockset').onclick=()=>{
   ED.blockset = ED.blockset===1 ? 2 : 1;
   $('edBlockset').innerHTML='&#9646; BLOCKS: STORY '+ED.blockset;
@@ -4489,7 +4671,7 @@ $('edShare').onclick=()=>{
       <button id="shareLoad">LOAD FROM CODE</button><button id="shareClose">CLOSE</button></div>`);
   $('shareLoad').onclick=()=>{
     try{ const o=JSON.parse(atob($('shareTA').value.trim()));
-      ED.lv=objToLevel(o); G.level=ED.lv; G.runGrid=ED.lv.grid;
+      ED.lv=objToLevel(o); G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selX=null; ED.selY=null;
       $('edName').value=ED.lv.name; setSizeSelectFor(ED.lv);
       fitEditorCam(); closeModal(); toast('Loaded "'+ED.lv.name+'"');
     }catch(e){toast('⚠ That code is corrupted (real corruption, not Malwrath).');}
@@ -4527,6 +4709,7 @@ function paintAt(px,py){
   const gxx=Math.floor(wx/T), gyy=Math.floor(wy/T);
   const lv=ED.lv;
   if(gxx<0||gyy<0||gxx>=lv.w||gyy>=lv.h)return;
+  if(ED.tool==='select'){ ED.selX=gxx; ED.selY=gyy; SFX.click(); return; }
   if(ED.painting===2||ED.tool===-1){gset(lv,gxx,gyy,0);return;}
   if(ED.tool===CODES.START||ED.tool===CODES.FINISH){ // only one allowed
     for(let i=0;i<lv.grid.length;i++)if(lv.grid[i]===ED.tool)lv.grid[i]=0;
@@ -4551,18 +4734,36 @@ function renderEditorWorld(){
   for(let y=0;y<lv.h;y++)for(let x=0;x<lv.w;x++){
     const c=lv.grid[y*lv.w+x];if(!c)continue;
     const px=x*T,py=y*T;
-    if(c<=CODES.BOUNCE&&c!==CODES.ENEMY&&c!==CODES.HMOVE&&c!==CODES.VMOVE) drawTile(c,px,py,x,y);
+    if(c!==CODES.ENEMY&&c!==CODES.HMOVE&&c!==CODES.VMOVE&&c!==CODES.START&&c!==CODES.FINISH) drawTile(c,px,py,x,y);
     else if(c===CODES.ENEMY) drawEnemy({x:px+4,y:py+6,w:24,h:24,t:G.frame,dir:1});
     else if(c===CODES.HMOVE||c===CODES.VMOVE){
       drawMover({x:px,y:py+10,w:T*1.6,h:12});
       cx.fillStyle='#ffd54f';cx.font='14px monospace';
       cx.fillText(c===CODES.HMOVE?'↔':'↕',px+18,py+8);
+      const amp=T*(lv.physics?lv.physics.moverAmp:2.5);
+      cx.strokeStyle='rgba(255,213,79,.55)'; cx.lineWidth=2; cx.setLineDash([5,5]);
+      cx.beginPath();
+      if(c===CODES.HMOVE){ cx.moveTo(px+16-amp,py+16); cx.lineTo(px+16+amp,py+16); }
+      else { cx.moveTo(px+16,py+16-amp); cx.lineTo(px+16,py+16+amp); }
+      cx.stroke(); cx.setLineDash([]); cx.lineWidth=1;
+      cx.fillStyle='rgba(255,213,79,.85)';
+      if(c===CODES.HMOVE){ cx.beginPath();cx.arc(px+16-amp,py+16,3,0,7);cx.fill();
+        cx.beginPath();cx.arc(px+16+amp,py+16,3,0,7);cx.fill(); }
+      else { cx.beginPath();cx.arc(px+16,py+16-amp,3,0,7);cx.fill();
+        cx.beginPath();cx.arc(px+16,py+16+amp,3,0,7);cx.fill(); }
     }
     else if(c===CODES.START){cx.fillStyle='#57d9a3';cx.fillRect(px+6,py+4,20,26);
       cx.fillStyle='#10241c';cx.font='10px monospace';cx.fillText('S',px+12,py+20);}
     else if(c===CODES.FINISH){drawFinishAt(x,y);}
   }
   cx.strokeStyle='#57d9a3'; cx.strokeRect(0,0,lv.w*T,lv.h*T);
+  if(ED.selX!=null && ED.selX>=0 && ED.selX<lv.w && ED.selY>=0 && ED.selY<lv.h){
+    const sx2=ED.selX*T, sy2=ED.selY*T;
+    cx.strokeStyle='#ffd54f'; cx.lineWidth=3;
+    cx.setLineDash([4,3]); cx.lineDashOffset=-G.frame/2;
+    cx.strokeRect(sx2-1,sy2-1,T+2,T+2);
+    cx.setLineDash([]); cx.lineWidth=1;
+  }
   cx.restore();
   cx.save(); // rebalance for the restore in render()
 }
@@ -4592,9 +4793,8 @@ $('btnMyLevels').onclick=async()=>{
   });
   document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{
     const o=G.customList[+b.dataset.edit]; closeModal();
-    enterEditor(false); ED.lv=objToLevel(o); G.level=ED.lv; G.runGrid=ED.lv.grid;
+    enterEditor(false); ED.lv=objToLevel(o); G.level=ED.lv; G.runGrid=ED.lv.grid; ED.selX=null; ED.selY=null;
     $('edName').value=ED.lv.name; $('edWall').checked=!!ED.lv.wall; $('edWallSec').value=ED.lv.wallSec;
-    $('edDashMode').checked=!!ED.lv.dashMode;
     setSizeSelectFor(ED.lv);
     fitEditorCam();
   });
